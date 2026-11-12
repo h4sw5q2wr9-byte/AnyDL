@@ -1,0 +1,105 @@
+// AnyDL - download whatever a link points to, then preview it.
+// The downloader itself is anydl.py, embedded below as base64 by build.py
+// and run inside the a-Shell app.
+
+#define name AnyDL
+#define color blue
+#define glyph circledDownArrow
+#define inputs url, text, webpage
+#define from sharesheet
+#define noinput getclipboard
+
+#include 'actions/web'
+#include 'actions/text'
+#include 'actions/crypto'
+
+// Keep a blank line after each definition: the compiler swallows the next line otherwise.
+action 'AsheKube.app.a-Shell.ExecuteCommandIntent' aShellRun(text command: 'command', text openWindow: 'openWindow', bool keepGoing: 'keepGoing') {
+    "ShowWhenRun": false
+}
+
+action 'AsheKube.app.a-Shell.PutFileIntent' aShellPut(variable file: 'file', bool overwrite: 'overwrite') {
+    "ShowWhenRun": false
+}
+
+action 'AsheKube.app.a-Shell.GetFileIntent' aShellGet(text fileName: 'fileName', bool errorIfNotFound: 'errorIfNotFound', bool copyFile: 'copyFile'): variable {
+    "ShowWhenRun": false
+}
+
+/* 1. Work out which link to download: shared item, else clipboard, else ask. */
+const found = getURLs("{ShortcutInput}")
+@link = getFirstItem(found)
+if !@link {
+    @link = prompt("Paste the link to download", "URL")
+}
+
+/* 2. Main menu: what kind of thing to download. */
+const iconVideo = "__ICON_VIDEO__"
+const iconAudio = "__ICON_AUDIO__"
+const iconGallery = "__ICON_GALLERY__"
+const iconFile = "__ICON_FILE__"
+@items: array
+@items += makeVCard("Download Video", "Videos, GIFs and clips", iconVideo)
+@items += makeVCard("Download Audio", "Music, or the sound of a video", iconAudio)
+@items += makeVCard("Download Gallery", "Images, albums and photo posts", iconGallery)
+@items += makeVCard("Download File", "Documents, archives, anything linked", iconFile)
+@menuText = "{@items}"
+@menuFile = setName(@menuText, "menu.vcf", true)
+@menuCards = @menuFile.contact
+const site = getURLDetail("{@link}", "Host")
+@choice = chooseFromList(@menuCards, "Download from {site}")
+@choiceName = "{@choice}"
+@mode = "video"
+if @choiceName contains "Audio" {
+    @mode = "audio"
+}
+if @choiceName contains "Gallery" {
+    @mode = "gallery"
+}
+if @choiceName contains "File" {
+    @mode = "file"
+}
+
+/* 3. Hand the downloader script and the job to a-Shell. */
+const scriptText = "__SCRIPT_B64__"
+const scriptData = base64Decode(scriptText)
+const scriptFile = setName(scriptData, "anydl.py", true)
+aShellPut(scriptFile, true)
+const jobText = "{@mode}\n{@link}"
+const jobFile = setName(jobText, "anydl_job.txt", true)
+aShellPut(jobFile, true)
+
+/* 4. Run it in the a-Shell app, which switches back here when it is done. */
+aShellRun("cd $SHORTCUTS\npython anydl.py\nopen shortcuts://", "open", false)
+waitToReturn()
+const statusFile = aShellGet("anydl_status.txt", true, true)
+@status = "{statusFile}"
+
+/* 5. Several items on the page: pick here, then run the downloader again. */
+if @status == "PICK" {
+    const choicesFile = aShellGet("anydl_choices.txt", true, true)
+    // The separator is spelled out on purpose: leaving it at the default breaks the build.
+    const options = splitText("{choicesFile}", "\n")
+    const picked = chooseFromList(options, "Choose what to download", true)
+    const pickText = "pick\n{picked}"
+    const pickFile = setName(pickText, "anydl_job.txt", true)
+    aShellPut(pickFile, true)
+    aShellRun("cd $SHORTCUTS\npython anydl.py\nopen shortcuts://", "open", false)
+    waitToReturn()
+    const statusAgain = aShellGet("anydl_status.txt", true, true)
+    @status = "{statusAgain}"
+}
+
+if @status != "OK" {
+    alert("{@status}", "AnyDL")
+    stop()
+}
+
+/* 6. Collect the downloaded files and preview them. The share button in the
+      preview saves to Photos, Files, or anywhere else. */
+const listFile = aShellGet("anydl_files.txt", true, true)
+const names = splitText("{listFile}", "\n")
+const downloads = for fileName in names {
+    aShellGet("{@fileName}", true, true)
+}
+quicklook(downloads)

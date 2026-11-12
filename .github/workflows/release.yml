@@ -1,0 +1,68 @@
+name: Release
+
+# Publishes a GitHub Release with the signed shortcut attached.
+# Runs when a version tag (v2.2, v3.0, ...) is pushed, or by hand from the
+# Actions tab with the version to release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, for example v2.2"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out the version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          version="${INPUT_VERSION:-$GITHUB_REF_NAME}"
+          case "$version" in
+            v[0-9]*) ;;
+            *) echo "Version must look like v2.2, got: $version"; exit 1 ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check the shortcut is signed and matches the version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          test "$(head -c 4 AnyDL.shortcut)" = "AEA1" || { echo "AnyDL.shortcut is not a signed shortcut"; exit 1; }
+          grep -q "VERSION = \"${VERSION#v}\"" anydl.py || { echo "anydl.py is not version ${VERSION#v}"; exit 1; }
+
+      - name: Write the release notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          {
+            echo "## Install"
+            echo
+            echo "1. Install [a-Shell](https://apps.apple.com/app/a-shell/id1473805438) (the full app, not a-Shell mini) and open it once."
+            echo "2. Download **AnyDL.shortcut** below on your iPhone or iPad, open it and tap **Add Shortcut**."
+            echo
+            echo "## Changes"
+            echo
+            awk -v v="## ${VERSION#v}" '$0==v{on=1;next} /^## /{on=0} on' CHANGELOG.md
+          } > notes.md
+          cat notes.md
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "$VERSION" AnyDL.shortcut \
+            --title "AnyDL ${VERSION#v}" \
+            --notes-file notes.md \
+            --target "$GITHUB_SHA" \
+            --latest
