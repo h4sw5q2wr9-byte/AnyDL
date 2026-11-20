@@ -69,8 +69,9 @@ const jobText = "{@mode}\n{@link}"
 const jobFile = setName(jobText, "anydl_job.txt", true)
 aShellPut(jobFile, true)
 
-/* 4. Run it in the a-Shell app, which switches back here when it is done. */
-aShellRun("cd $SHORTCUTS\npython anydl.py\nopen shortcuts://", "open", false)
+/* 4. Run it in the a-Shell app. The script switches back here itself when it
+      is done, except for large files, which it shows in a-Shell instead. */
+aShellRun("cd $SHORTCUTS\npython anydl.py", "open", false)
 waitToReturn()
 const statusFile = aShellGet("anydl_status.txt", true, true)
 @status = "{statusFile}"
@@ -84,10 +85,15 @@ if @status == "PICK" {
     const pickText = "pick\n{picked}"
     const pickFile = setName(pickText, "anydl_job.txt", true)
     aShellPut(pickFile, true)
-    aShellRun("cd $SHORTCUTS\npython anydl.py\nopen shortcuts://", "open", false)
+    aShellRun("cd $SHORTCUTS\npython anydl.py", "open", false)
     waitToReturn()
     const statusAgain = aShellGet("anydl_status.txt", true, true)
     @status = "{statusAgain}"
+}
+
+/* Large files were already shown in a-Shell, with a share button. */
+if @status == "VIEW" {
+    stop()
 }
 
 if @status != "OK" {
@@ -96,26 +102,10 @@ if @status != "OK" {
 }
 
 /* 6. Collect the downloaded files and preview them. The share button in the
-      preview saves to Photos, Files, or anywhere else.
-      Small files are copied out of a-Shell. Large ones are passed by
-      reference, because copying them crashes a-Shell's background extension.
-      A missing list just means there were no files of that size. */
-@downloads: array
-const smallList = aShellGet("anydl_files.txt", false, true)
-// The separator is spelled out on purpose: leaving it at the default breaks the build.
-const smallNames = splitText("{smallList}", "\n")
-for smallName in smallNames {
-    if @smallName {
-        const smallFile = aShellGet("{@smallName}", true, true)
-        @downloads += smallFile
-    }
+      preview saves to Photos, Files, or anywhere else. */
+const listFile = aShellGet("anydl_files.txt", true, true)
+const names = splitText("{listFile}", "\n")
+const downloads = for fileName in names {
+    aShellGet("{@fileName}", true, true)
 }
-const largeList = aShellGet("anydl_large.txt", false, true)
-const largeNames = splitText("{largeList}", "\n")
-for largeName in largeNames {
-    if @largeName {
-        const largeFile = aShellGet("{@largeName}", true, false)
-        @downloads += largeFile
-    }
-}
-quicklook(@downloads)
+quicklook(downloads)

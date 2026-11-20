@@ -6,10 +6,13 @@ anydl_job.txt, runs this script, and reads the result back:
 
     anydl_job.txt      line 1: mode (video | audio | gallery | file | pick)
                        then the link, or for "pick" the chosen list entries
-    anydl_status.txt   "OK", "PICK", or a one-line error message
-    anydl_files.txt    when OK: downloaded files up to LARGE_BYTES, one per line
-    anydl_large.txt    when OK: larger downloaded files, one per line
+    anydl_status.txt   "OK", "PICK", "VIEW", or a one-line error message
+    anydl_files.txt    when OK: one downloaded file name per line
     anydl_choices.txt  when PICK: one entry per line for the shortcut to list
+    anydl_large.txt    when VIEW: full paths of the files shown in a-Shell
+
+The script switches back to Shortcuts itself, except for "VIEW": large files
+are shown in a-Shell's own preview instead (see LARGE_BYTES).
 
 What each mode tries, after first checking whether the link itself is a file:
     video    yt-dlp, then video found on the page
@@ -34,7 +37,7 @@ import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
 
-VERSION = "2.3"
+VERSION = "2.4"
 
 BASE = os.environ.get("ANYDL_DIR") or os.environ.get("SHORTCUTS") or os.getcwd()
 TMP = os.path.join(BASE, "anydl_tmp")
@@ -55,11 +58,41 @@ MAX_ITEMS = 25          # cap for playlists and galleries
 MENU_LIMIT = 60
 MODES = ("video", "audio", "gallery", "file")
 
-# The shortcut fetches files from a-Shell with "Get File". Its "copy file"
-# option loads the whole file into a-Shell's background extension, which is
-# killed for large files, so the shortcut silently stops. Files above this size
-# are listed separately and fetched by reference instead.
-LARGE_BYTES = 20 * 1024 * 1024
+# The shortcut fetches files from a-Shell with "Get File", which fails for
+# large files: with "copy file" it loads the whole file into memory, and
+# without it Shortcuts crashes on iOS 27.2 (a-Shell issue #1138). Downloads
+# above this size never go through Get File. They are moved to a folder
+# visible in the Files app (On My iPhone > a-Shell > AnyDL) and shown in
+# a-Shell's own Quick Look preview, which has the same share button.
+LARGE_BYTES = 50 * 1024 * 1024
+VISIBLE_DIR = os.path.join(os.path.expanduser("~"), "Documents", "AnyDL")
+
+# Set once control has been handed back to Shortcuts or to the preview.
+_handed_off = False
+
+
+def a_shell(command):
+    """Run an a-Shell command such as `open` or `view` (no-op elsewhere)."""
+    try:
+        subprocess.run(command)
+        return True
+    except Exception:
+        return False
+
+
+def back_to_shortcuts():
+    global _handed_off
+    if not _handed_off:
+        _handed_off = True
+        a_shell("open shortcuts://")
+
+
+def show_in_ashell(path):
+    global _handed_off
+    _handed_off = True
+    # a-Shell splits the command line itself; names never contain double
+    # quotes or backslashes (see safe_name), so plain quoting is enough.
+    a_shell('view "%s"' % path)
 
 VIDEO_EXT = {"mp4", "m4v", "mov", "webm", "mkv", "avi", "flv", "wmv", "mpg", "mpeg", "3gp", "ts"}
 AUDIO_EXT = {"mp3", "m4a", "aac", "wav", "flac", "ogg", "opus", "wma", "aiff"}
@@ -104,22 +137,45 @@ def write_status(text):
 def finish(files=None, error=None):
     """Write the result files the shortcut reads, then exit."""
     shutil.rmtree(TMP, ignore_errors=True)
+    if files and any(os.path.getsize(p) > LARGE_BYTES for p in files):
+        shown = move_visible(files)
+        with open(LARGE_FILE, "w", encoding="utf-8") as f:
+            f.write("\n".join(shown))
+        write_status("VIEW")
+        say("\nDone: %d file%s, saved in Files > On My iPhone > a-Shell > AnyDL."
+            % (len(shown), "" if len(shown) == 1 else "s"))
+        say("It is large, so it opens here instead of in Shortcuts.")
+        biggest = max(shown, key=os.path.getsize)
+        show_in_ashell(biggest)
+        sys.exit(0)
     if files:
-        small = [p for p in files if os.path.getsize(p) <= LARGE_BYTES]
-        large = [p for p in files if os.path.getsize(p) > LARGE_BYTES]
-        # Only non-empty lists are written; the shortcut treats a missing
-        # list as empty.
-        for path, group in ((LIST_FILE, small), (LARGE_FILE, large)):
-            if group:
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write("\n".join(os.path.basename(p) for p in group))
+        with open(LIST_FILE, "w", encoding="utf-8") as f:
+            f.write("\n".join(os.path.basename(p) for p in files))
         status = "OK"
         say("\nDone: %d file%s." % (len(files), "" if len(files) == 1 else "s"))
     else:
         status = re.sub(r"\s+", " ", error or "Nothing was downloaded.").strip()[:400]
         say("\nFailed: " + status)
     write_status(status)
+    back_to_shortcuts()
     sys.exit(0)
+
+
+def move_visible(files):
+    """Move a run's files into the folder the Files app shows."""
+    os.makedirs(VISIBLE_DIR, exist_ok=True)
+    out = []
+    for src in files:
+        name = os.path.basename(src)
+        stem, ext = os.path.splitext(name)
+        dest = os.path.join(VISIBLE_DIR, name)
+        n = 2
+        while os.path.exists(dest):
+            dest = os.path.join(VISIBLE_DIR, "%s (%d)%s" % (stem, n, ext))
+            n += 1
+        shutil.move(src, dest)
+        out.append(dest)
+    return out
 
 
 def cleanup_previous(keep_candidates=False):
@@ -131,10 +187,12 @@ def cleanup_previous(keep_candidates=False):
             with open(listing, encoding="utf-8") as f:
                 for line in f.read().splitlines():
                     name = os.path.basename(line.strip())
-                    if name and not name.startswith("anydl"):
-                        path = os.path.join(BASE, name)
-                        if os.path.isfile(path):
-                            os.remove(path)
+                    if not name or name.startswith("anydl"):
+                        continue
+                    folder = VISIBLE_DIR if listing == LARGE_FILE else BASE
+                    path = os.path.join(folder, name)
+                    if os.path.isfile(path):
+                        os.remove(path)
         except OSError:
             pass
     leftovers = [LIST_FILE, LARGE_FILE, CHOICES_FILE]
@@ -849,6 +907,7 @@ def main():
         shutil.rmtree(TMP, ignore_errors=True)
         write_status("PICK")
         say("\nSeveral items found - choose in the shortcut.")
+        back_to_shortcuts()
         sys.exit(0)
     except Failed as e:
         finish(error=str(e))
@@ -860,4 +919,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        # Never leave the shortcut waiting, even if something above crashed.
+        back_to_shortcuts()

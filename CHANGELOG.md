@@ -1,10 +1,15 @@
 # Changelog
 
-## 2.3
+## 2.4
 
-- Fixed large videos not appearing after download. Files over 20 MB are now
-  passed from a-Shell by reference instead of being copied, which crashed
-  a-Shell's background extension.
+- Fixed large videos not appearing after download. a-Shell's "Get File"
+  fails for large files (on iOS 27.2 it crashes Shortcuts outright, see
+  [a-Shell issue #1138](https://github.com/holzschu/a-shell/issues/1138)).
+  Downloads over 50 MB now skip it: they are saved to
+  On My iPhone › a-Shell › AnyDL in the Files app and shown in a-Shell's own
+  preview, which has the same share button.
+- The downloader now switches back to Shortcuts itself, and does so even if
+  it fails unexpectedly.
 
 ## 2.2
 
