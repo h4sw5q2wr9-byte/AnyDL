@@ -70,7 +70,7 @@ const jobFile = setName(jobText, "anydl_job.txt", true)
 aShellPut(jobFile, true)
 
 /* 4. Run it in the a-Shell app. The script switches back here itself when it
-      is done, except for large files, which it shows in a-Shell instead. */
+      is done, unless it shows the download in a-Shell instead. */
 aShellRun("cd $SHORTCUTS\npython anydl.py", "open", false)
 waitToReturn()
 const statusFile = aShellGet("anydl_status.txt", true, true)
@@ -91,7 +91,7 @@ if @status == "PICK" {
     @status = "{statusAgain}"
 }
 
-/* Large files were already shown in a-Shell, with a share button. */
+/* The download was already shown in a-Shell, with a share button. */
 if @status == "VIEW" {
     stop()
 }

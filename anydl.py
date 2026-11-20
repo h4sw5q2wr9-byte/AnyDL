@@ -9,10 +9,10 @@ anydl_job.txt, runs this script, and reads the result back:
     anydl_status.txt   "OK", "PICK", "VIEW", or a one-line error message
     anydl_files.txt    when OK: one downloaded file name per line
     anydl_choices.txt  when PICK: one entry per line for the shortcut to list
-    anydl_large.txt    when VIEW: full paths of the files shown in a-Shell
+    anydl_large.txt    when VIEW: full paths of the files saved for the preview
 
-The script switches back to Shortcuts itself, except for "VIEW": large files
-are shown in a-Shell's own preview instead (see LARGE_BYTES).
+The script switches back to Shortcuts itself, except for "VIEW": then the
+download is shown in a-Shell's own preview instead (see show_in_ashell).
 
 What each mode tries, after first checking whether the link itself is a file:
     video    yt-dlp, then video found on the page
@@ -37,7 +37,7 @@ import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
 
-VERSION = "2.4"
+VERSION = "2.5"
 
 BASE = os.environ.get("ANYDL_DIR") or os.environ.get("SHORTCUTS") or os.getcwd()
 TMP = os.path.join(BASE, "anydl_tmp")
@@ -58,12 +58,15 @@ MAX_ITEMS = 25          # cap for playlists and galleries
 MENU_LIMIT = 60
 MODES = ("video", "audio", "gallery", "file")
 
-# The shortcut fetches files from a-Shell with "Get File", which fails for
-# large files: with "copy file" it loads the whole file into memory, and
-# without it Shortcuts crashes on iOS 27.2 (a-Shell issue #1138). Downloads
-# above this size never go through Get File. They are moved to a folder
-# visible in the Files app (On My iPhone > a-Shell > AnyDL) and shown in
-# a-Shell's own Quick Look preview, which has the same share button.
+# A single download is shown in a-Shell's own Quick Look preview, which has
+# the same share button as the one in Shortcuts, and is kept in a folder the
+# Files app shows (On My iPhone > a-Shell > AnyDL). a-Shell can only preview
+# one file at a time, so several files go back to Shortcuts, which can page
+# through them, unless one of them is large: Shortcuts gets files from a-Shell
+# with "Get File", which fails for large files (with "copy file" it loads the
+# whole file into memory, and without it Shortcuts crashes on iOS 27.2, see
+# a-Shell issue #1138). Then the largest file is shown in a-Shell, and all of
+# them are in the Files folder.
 LARGE_BYTES = 50 * 1024 * 1024
 VISIBLE_DIR = os.path.join(os.path.expanduser("~"), "Documents", "AnyDL")
 
@@ -137,14 +140,13 @@ def write_status(text):
 def finish(files=None, error=None):
     """Write the result files the shortcut reads, then exit."""
     shutil.rmtree(TMP, ignore_errors=True)
-    if files and any(os.path.getsize(p) > LARGE_BYTES for p in files):
+    if files and (len(files) == 1 or any(os.path.getsize(p) > LARGE_BYTES for p in files)):
         shown = move_visible(files)
         with open(LARGE_FILE, "w", encoding="utf-8") as f:
             f.write("\n".join(shown))
         write_status("VIEW")
         say("\nDone: %d file%s, saved in Files > On My iPhone > a-Shell > AnyDL."
             % (len(shown), "" if len(shown) == 1 else "s"))
-        say("It is large, so it opens here instead of in Shortcuts.")
         biggest = max(shown, key=os.path.getsize)
         show_in_ashell(biggest)
         sys.exit(0)

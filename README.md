@@ -51,15 +51,16 @@ Start AnyDL in any of these ways:
 - Copy a link, then run AnyDL. It reads the clipboard.
 - Run AnyDL with nothing copied and paste the link when asked.
 
-Choose a mode from the menu. a-Shell opens, downloads, and switches back to
-Shortcuts by itself. The result opens in Quick Look; use the share button
-there to save it to Photos, Files, or anywhere else.
+Choose a mode from the menu. a-Shell opens, downloads, and shows the result
+in Quick Look right there; use the share button to save it to Photos, Files,
+or anywhere else. Downloads are also kept in the Files app under
+**On My iPhone › a-Shell › AnyDL**.
 
-**Large files (over 50 MB)** open in the same kind of preview, but inside
-a-Shell instead of Shortcuts, because Shortcuts cannot reliably receive large
-files from a-Shell. They are also saved in the Files app under
-**On My iPhone › a-Shell › AnyDL**. Close the preview and switch back
-yourself when you are done.
+When one download produces several files, such as a gallery, AnyDL switches
+back to Shortcuts and previews them there, so you can swipe through them. If
+one of them is over 50 MB, the largest opens in a-Shell instead, because
+Shortcuts cannot reliably receive large files from a-Shell; the rest are in
+the AnyDL folder.
 
 ## How it works
 
@@ -94,7 +95,7 @@ are passed back to the shortcut through a few small text files.
 | --- | --- |
 | The first run is slow | It is installing the downloaders. Leave a-Shell open until it switches back. |
 | "The download did not finish" | You returned to Shortcuts before a-Shell was done. Run it again and wait. |
-| A large video opened in a-Shell | That is expected for files over 50 MB. Use the share button there, or find it in Files › On My iPhone › a-Shell › AnyDL. |
+| I closed the preview too early | Find the download in Files › On My iPhone › a-Shell › AnyDL. |
 | An alert with a downloader error | The message comes from yt-dlp or gallery-dl and usually names the cause, such as a login requirement. |
 | A site stopped working | Sites change often. The downloaders update weekly; to force it, run `pip install -U yt-dlp gallery-dl` in a-Shell. |
 

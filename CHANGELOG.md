@@ -1,14 +1,16 @@
 # Changelog
 
-## 2.4
+## 2.5
 
+- Downloads now open in a-Shell's own preview, with the same share button,
+  instead of switching back to Shortcuts. They are also kept in the Files app
+  under On My iPhone › a-Shell › AnyDL. Several files at once still open in
+  Shortcuts, which can page through them.
 - Fixed large videos not appearing after download. a-Shell's "Get File"
   fails for large files (on iOS 27.2 it crashes Shortcuts outright, see
-  [a-Shell issue #1138](https://github.com/holzschu/a-shell/issues/1138)).
-  Downloads over 50 MB now skip it: they are saved to
-  On My iPhone › a-Shell › AnyDL in the Files app and shown in a-Shell's own
-  preview, which has the same share button.
-- The downloader now switches back to Shortcuts itself, and does so even if
+  [a-Shell issue #1138](https://github.com/holzschu/a-shell/issues/1138)), so
+  files over 50 MB never go through it.
+- The downloader switches back to Shortcuts itself when it needs to, even if
   it fails unexpectedly.
 
 ## 2.2
