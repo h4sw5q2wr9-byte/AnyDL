@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.5
+## 2.6
 
 - Downloads now open in a-Shell's own preview, with the same share button,
   instead of switching back to Shortcuts. They are also kept in the Files app
@@ -10,8 +10,10 @@
   fails for large files (on iOS 27.2 it crashes Shortcuts outright, see
   [a-Shell issue #1138](https://github.com/holzschu/a-shell/issues/1138)), so
   files over 50 MB never go through it.
-- The downloader switches back to Shortcuts itself when it needs to, even if
-  it fails unexpectedly.
+- The shortcut no longer waits in the background for a-Shell, so it can no
+  longer be left running. When there is something to show in Shortcuts (a
+  choice, an error, several files), the downloader starts AnyDL again, even
+  if it fails unexpectedly.
 
 ## 2.2
 

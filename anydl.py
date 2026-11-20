@@ -11,8 +11,10 @@ anydl_job.txt, runs this script, and reads the result back:
     anydl_choices.txt  when PICK: one entry per line for the shortcut to list
     anydl_large.txt    when VIEW: full paths of the files saved for the preview
 
-The script switches back to Shortcuts itself, except for "VIEW": then the
-download is shown in a-Shell's own preview instead (see show_in_ashell).
+The shortcut does not wait for this script. When there is something for it
+to show (status PICK, OK or an error), the script starts AnyDL again with
+"anydl-return" as input (see back_to_shortcuts). For "VIEW" it shows the
+download in a-Shell's own preview instead (see show_in_ashell).
 
 What each mode tries, after first checking whether the link itself is a file:
     video    yt-dlp, then video found on the page
@@ -37,7 +39,7 @@ import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
 
-VERSION = "2.5"
+VERSION = "2.6"
 
 BASE = os.environ.get("ANYDL_DIR") or os.environ.get("SHORTCUTS") or os.getcwd()
 TMP = os.path.join(BASE, "anydl_tmp")
@@ -83,11 +85,16 @@ def a_shell(command):
         return False
 
 
+# Starts the shortcut again so it can show the results. The shortcut has to
+# keep the name AnyDL for this. The URL has no spaces, so it needs no quoting.
+RETURN_URL = "shortcuts://run-shortcut?name=AnyDL&input=text&text=anydl-return"
+
+
 def back_to_shortcuts():
     global _handed_off
     if not _handed_off:
         _handed_off = True
-        a_shell("open shortcuts://")
+        a_shell("open " + RETURN_URL)
 
 
 def show_in_ashell(path):

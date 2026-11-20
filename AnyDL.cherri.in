@@ -26,7 +26,46 @@ action 'AsheKube.app.a-Shell.GetFileIntent' aShellGet(text fileName: 'fileName',
     "ShowWhenRun": false
 }
 
-/* 1. Work out which link to download: shared item, else clipboard, else ask. */
+/* AnyDL runs in two halves and never waits for a-Shell, so it can never be
+   left running in the background:
+   - Started normally, it asks what to download, starts a-Shell, and ends.
+   - a-Shell shows a single download in its own preview. Only when there is
+     something to show here (a choice, an error, several files) does the
+     script start AnyDL again, with the text anydl-return as input. */
+
+/* Second half: results from a-Shell. */
+@input = "{ShortcutInput}"
+if @input contains "anydl-return" {
+    const statusFile = aShellGet("anydl_status.txt", true, true)
+    @status = "{statusFile}"
+    if @status == "PICK" {
+        /* Several items on the page: pick here, then run the downloader again. */
+        const choicesFile = aShellGet("anydl_choices.txt", true, true)
+        // The separator is spelled out on purpose: leaving it at the default breaks the build.
+        const options = splitText("{choicesFile}", "\n")
+        const picked = chooseFromList(options, "Choose what to download", true)
+        const pickText = "pick\n{picked}"
+        const pickFile = setName(pickText, "anydl_job.txt", true)
+        aShellPut(pickFile, true)
+        aShellRun("cd $SHORTCUTS\npython anydl.py", "open", false)
+        stop()
+    }
+    if @status != "OK" {
+        alert("{@status}", "AnyDL")
+        stop()
+    }
+    /* Several files: preview them here, where you can swipe through them. */
+    const listFile = aShellGet("anydl_files.txt", true, true)
+    const names = splitText("{listFile}", "\n")
+    const downloads = for fileName in names {
+        aShellGet("{@fileName}", true, true)
+    }
+    quicklook(downloads)
+    stop()
+}
+
+/* First half. 1. Work out which link to download: shared item, else
+   clipboard, else ask. */
 const found = getURLs("{ShortcutInput}")
 @link = getFirstItem(found)
 if !@link {
@@ -69,43 +108,6 @@ const jobText = "{@mode}\n{@link}"
 const jobFile = setName(jobText, "anydl_job.txt", true)
 aShellPut(jobFile, true)
 
-/* 4. Run it in the a-Shell app. The script switches back here itself when it
-      is done, unless it shows the download in a-Shell instead. */
+/* 4. Start the download in a-Shell. This shortcut ends here; a-Shell shows
+      the result, or starts AnyDL again when it needs to. */
 aShellRun("cd $SHORTCUTS\npython anydl.py", "open", false)
-waitToReturn()
-const statusFile = aShellGet("anydl_status.txt", true, true)
-@status = "{statusFile}"
-
-/* 5. Several items on the page: pick here, then run the downloader again. */
-if @status == "PICK" {
-    const choicesFile = aShellGet("anydl_choices.txt", true, true)
-    // The separator is spelled out on purpose: leaving it at the default breaks the build.
-    const options = splitText("{choicesFile}", "\n")
-    const picked = chooseFromList(options, "Choose what to download", true)
-    const pickText = "pick\n{picked}"
-    const pickFile = setName(pickText, "anydl_job.txt", true)
-    aShellPut(pickFile, true)
-    aShellRun("cd $SHORTCUTS\npython anydl.py", "open", false)
-    waitToReturn()
-    const statusAgain = aShellGet("anydl_status.txt", true, true)
-    @status = "{statusAgain}"
-}
-
-/* The download was already shown in a-Shell, with a share button. */
-if @status == "VIEW" {
-    stop()
-}
-
-if @status != "OK" {
-    alert("{@status}", "AnyDL")
-    stop()
-}
-
-/* 6. Collect the downloaded files and preview them. The share button in the
-      preview saves to Photos, Files, or anywhere else. */
-const listFile = aShellGet("anydl_files.txt", true, true)
-const names = splitText("{listFile}", "\n")
-const downloads = for fileName in names {
-    aShellGet("{@fileName}", true, true)
-}
-quicklook(downloads)

@@ -38,7 +38,8 @@ Look, ready to save to Photos or Files.
 1. Install a-Shell from the App Store and open it once.
 2. On your iPhone or iPad, download `AnyDL.shortcut` from the
    [latest release](../../releases/latest).
-3. Open the file and tap **Add Shortcut**.
+3. Open the file and tap **Add Shortcut**. Keep the name **AnyDL**: a-Shell
+   uses it to hand results back to the shortcut.
 
 The first download installs yt-dlp and gallery-dl inside a-Shell, which takes
 a minute or two. After that it starts immediately.
@@ -74,8 +75,13 @@ Share sheet ──► AnyDL shortcut ──► a-Shell runs anydl.py ──► Q
 The shortcut is only the front end. It hands a small Python script,
 [`anydl.py`](anydl.py), and the link to a-Shell. The script first checks
 whether the link itself is a file. If not, it runs the downloader for the
-chosen mode, and falls back to scanning the page for matching media. Results
-are passed back to the shortcut through a few small text files.
+chosen mode, and falls back to scanning the page for matching media.
+
+The shortcut never waits for a-Shell, so nothing is left running. a-Shell
+shows a single download itself. When there is something to show in Shortcuts
+(a choice, an error, several files), the script starts AnyDL again with the
+input `anydl-return`, and that run reads the results from a few small text
+files.
 
 ## Limitations
 
@@ -94,7 +100,8 @@ are passed back to the shortcut through a few small text files.
 | Problem | What to do |
 | --- | --- |
 | The first run is slow | It is installing the downloaders. Leave a-Shell open until it switches back. |
-| "The download did not finish" | You returned to Shortcuts before a-Shell was done. Run it again and wait. |
+| "The download did not finish" | The downloader stopped unexpectedly. Run it again. |
+| Results never come back to Shortcuts | Make sure the shortcut is still named **AnyDL**. |
 | I closed the preview too early | Find the download in Files › On My iPhone › a-Shell › AnyDL. |
 | An alert with a downloader error | The message comes from yt-dlp or gallery-dl and usually names the cause, such as a login requirement. |
 | A site stopped working | Sites change often. The downloaders update weekly; to force it, run `pip install -U yt-dlp gallery-dl` in a-Shell. |
