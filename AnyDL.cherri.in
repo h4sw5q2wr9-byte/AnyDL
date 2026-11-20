@@ -96,10 +96,26 @@ if @status != "OK" {
 }
 
 /* 6. Collect the downloaded files and preview them. The share button in the
-      preview saves to Photos, Files, or anywhere else. */
-const listFile = aShellGet("anydl_files.txt", true, true)
-const names = splitText("{listFile}", "\n")
-const downloads = for fileName in names {
-    aShellGet("{@fileName}", true, true)
+      preview saves to Photos, Files, or anywhere else.
+      Small files are copied out of a-Shell. Large ones are passed by
+      reference, because copying them crashes a-Shell's background extension.
+      A missing list just means there were no files of that size. */
+@downloads: array
+const smallList = aShellGet("anydl_files.txt", false, true)
+// The separator is spelled out on purpose: leaving it at the default breaks the build.
+const smallNames = splitText("{smallList}", "\n")
+for smallName in smallNames {
+    if @smallName {
+        const smallFile = aShellGet("{@smallName}", true, true)
+        @downloads += smallFile
+    }
 }
-quicklook(downloads)
+const largeList = aShellGet("anydl_large.txt", false, true)
+const largeNames = splitText("{largeList}", "\n")
+for largeName in largeNames {
+    if @largeName {
+        const largeFile = aShellGet("{@largeName}", true, false)
+        @downloads += largeFile
+    }
+}
+quicklook(@downloads)

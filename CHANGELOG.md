@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.3
+
+- Fixed large videos not appearing after download. Files over 20 MB are now
+  passed from a-Shell by reference instead of being copied, which crashed
+  a-Shell's background extension.
+
 ## 2.2
 
 - Fixed YouTube downloads opening the YouTube app instead of returning to

@@ -7,7 +7,8 @@ anydl_job.txt, runs this script, and reads the result back:
     anydl_job.txt      line 1: mode (video | audio | gallery | file | pick)
                        then the link, or for "pick" the chosen list entries
     anydl_status.txt   "OK", "PICK", or a one-line error message
-    anydl_files.txt    when OK: one downloaded file name per line
+    anydl_files.txt    when OK: downloaded files up to LARGE_BYTES, one per line
+    anydl_large.txt    when OK: larger downloaded files, one per line
     anydl_choices.txt  when PICK: one entry per line for the shortcut to list
 
 What each mode tries, after first checking whether the link itself is a file:
@@ -33,13 +34,14 @@ import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
 
-VERSION = "2.2"
+VERSION = "2.3"
 
 BASE = os.environ.get("ANYDL_DIR") or os.environ.get("SHORTCUTS") or os.getcwd()
 TMP = os.path.join(BASE, "anydl_tmp")
 JOB_FILE = os.path.join(BASE, "anydl_job.txt")
 STATUS_FILE = os.path.join(BASE, "anydl_status.txt")
 LIST_FILE = os.path.join(BASE, "anydl_files.txt")
+LARGE_FILE = os.path.join(BASE, "anydl_large.txt")
 CHOICES_FILE = os.path.join(BASE, "anydl_choices.txt")
 CANDIDATES_FILE = os.path.join(BASE, "anydl_candidates.json")
 STAMP_FILE = os.path.join(BASE, "anydl_stamp.txt")
@@ -52,6 +54,12 @@ UPDATE_EVERY = 7 * 24 * 3600
 MAX_ITEMS = 25          # cap for playlists and galleries
 MENU_LIMIT = 60
 MODES = ("video", "audio", "gallery", "file")
+
+# The shortcut fetches files from a-Shell with "Get File". Its "copy file"
+# option loads the whole file into a-Shell's background extension, which is
+# killed for large files, so the shortcut silently stops. Files above this size
+# are listed separately and fetched by reference instead.
+LARGE_BYTES = 20 * 1024 * 1024
 
 VIDEO_EXT = {"mp4", "m4v", "mov", "webm", "mkv", "avi", "flv", "wmv", "mpg", "mpeg", "3gp", "ts"}
 AUDIO_EXT = {"mp3", "m4a", "aac", "wav", "flac", "ogg", "opus", "wma", "aiff"}
@@ -97,8 +105,14 @@ def finish(files=None, error=None):
     """Write the result files the shortcut reads, then exit."""
     shutil.rmtree(TMP, ignore_errors=True)
     if files:
-        with open(LIST_FILE, "w", encoding="utf-8") as f:
-            f.write("\n".join(os.path.basename(p) for p in files))
+        small = [p for p in files if os.path.getsize(p) <= LARGE_BYTES]
+        large = [p for p in files if os.path.getsize(p) > LARGE_BYTES]
+        # Only non-empty lists are written; the shortcut treats a missing
+        # list as empty.
+        for path, group in ((LIST_FILE, small), (LARGE_FILE, large)):
+            if group:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write("\n".join(os.path.basename(p) for p in group))
         status = "OK"
         say("\nDone: %d file%s." % (len(files), "" if len(files) == 1 else "s"))
     else:
@@ -110,9 +124,11 @@ def finish(files=None, error=None):
 
 def cleanup_previous(keep_candidates=False):
     """Delete the files left by the last run so storage does not pile up."""
-    if os.path.exists(LIST_FILE):
+    for listing in (LIST_FILE, LARGE_FILE):
+        if not os.path.exists(listing):
+            continue
         try:
-            with open(LIST_FILE, encoding="utf-8") as f:
+            with open(listing, encoding="utf-8") as f:
                 for line in f.read().splitlines():
                     name = os.path.basename(line.strip())
                     if name and not name.startswith("anydl"):
@@ -121,7 +137,7 @@ def cleanup_previous(keep_candidates=False):
                             os.remove(path)
         except OSError:
             pass
-    leftovers = [LIST_FILE, CHOICES_FILE]
+    leftovers = [LIST_FILE, LARGE_FILE, CHOICES_FILE]
     if not keep_candidates:
         leftovers.append(CANDIDATES_FILE)
     for path in leftovers:
