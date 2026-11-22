@@ -42,6 +42,16 @@ action 'AsheKube.app.a-Shell.GetFileIntent' aShellGet(text fileName: 'fileName',
 // WFFolder; real shortcuts use WFInput.
 action 'properties.files' fileDetailOf(variable file: 'WFInput', text detail: 'WFContentItemPropertyName')
 
+// Select Photos, limited to videos or to photos, so a tool never gets the
+// wrong kind (Encode Media cannot take a photo).
+action 'selectphoto' pickVideoFromPhotos(): variable {
+    "WFPhotoPickerTypes": "Videos"
+}
+
+action 'selectphoto' pickImageFromPhotos(): variable {
+    "WFPhotoPickerTypes": "Images"
+}
+
 /* AnyDL runs in two halves and never waits for a-Shell, so it can never be
    left running in the background:
    - Started normally, it shows the menu; a download starts a-Shell and ends.
@@ -204,19 +214,23 @@ if @update contains "." {
 }
 
 /* ------------------------------------------------ What was shared. */
-/* A link (shared, or on the clipboard) goes to the download menu. A photo,
-   video or file shared to AnyDL goes straight to the media tools. */
+/* A link (shared, or on the clipboard) opens the download menu. A photo,
+   video or audio file shared to AnyDL opens the matching media tools. */
 const found = getURLs("{ShortcutInput}")
 @link = getFirstItem(found)
 @shared
-@startTools = false
+@sharedKind = ""
+@view = "home"
+@videoTypes = "mov mp4 m4v 3gp avi mkv webm hevc"
+@photoTypes = "heic heif jpg jpeg png gif webp tiff tif bmp dng avif"
+@audioTypes = "m4a mp3 wav aac aiff aif caf flac ogg opus"
 if !@link {
     if @input !contains "anydl-return" {
         const inputKind = typeOf(ShortcutInput)
         @kind = "{inputKind}"
         if @kind contains "Image" || @kind contains "Media" || @kind contains "File" {
             @shared = ShortcutInput
-            @startTools = true
+            @view = "tools"
         }
     }
 }
@@ -226,345 +240,95 @@ if @link {
     @heading = "Download from {site}"
 }
 
-/* ------------------------------------------------ Main menu. */
-/* The menu comes back after Media tools, My downloads and Settings; a
-   download ends the shortcut once a-Shell has been started. */
-@mainItems: array
-@mainItems += "@@CARD(Download Video|Videos, GIFs and clips|video)@@"
-@mainItems += "@@CARD(Download Audio|Music, or the sound of a video|audio)@@"
-@mainItems += "@@CARD(Download Gallery|Images, albums and photo posts|gallery)@@"
-@mainItems += "@@CARD(Download File|Documents, archives, anything linked|file)@@"
-@mainItems += "@@CARD(Media tools|Compress, trim, GIF, extract audio, convert|tools)@@"
-@mainItems += "@@CARD(My downloads|Your AnyDL folders and recent downloads|library)@@"
-@mainItems += "@@CARD(Settings|Quality, subtitles, after download, storage|settings)@@"
-@mainText = "{@mainItems}"
-@mainFile = setName(@mainText, "menu.vcf", true)
-@mainCards = @mainFile.contact
-
 /* The downloader script, put into a-Shell before each a-Shell job. */
 const scriptText = "__SCRIPT_B64__"
 const scriptData = base64Decode(scriptText)
 const scriptFile = setName(scriptData, "anydl.py", true)
 
-repeat round for 30 {
-    if @startTools == true {
-        @choiceName = "Media tools"
-        @startTools = false
-    } else {
-        const mainChoice = chooseFromList(@mainCards, @heading)
-        @choiceName = "{mainChoice}"
-    }
+/* ------------------------------------------------ Menus. */
+/* One loop, one menu at a time: @view names the menu to show, and every
+   submenu has Back. Starting a download or opening Files ends the
+   shortcut. Menus are vCards so each row has an icon and a subtitle. */
+@mode = ""
+@libraryLoaded = false
+repeat round for 60 {
 
-    /* -------------------------------------------- Media tools. */
-    /* iOS's own actions: fast, and no a-Shell or app switching needed. */
-    if @choiceName == "Media tools" {
-        @toolItems: array
-        @toolItems += "@@CARD(Compress video|Make a video smaller to share or save space|compress)@@"
-        @toolItems += "@@CARD(Trim|Cut a video or song shorter|trim)@@"
-        @toolItems += "@@CARD(Make a GIF|Turn a video into an animated GIF|gif)@@"
-        @toolItems += "@@CARD(Extract audio|Save the sound of a video as M4A|extract)@@"
-        @toolItems += "@@CARD(Convert image|To JPEG, PNG or HEIF|convert)@@"
-        @toolItems += "@@CARD(Back|Return to the main menu|back)@@"
-        @toolText = "{@toolItems}"
-        @toolFile = setName(@toolText, "tools.vcf", true)
-        @toolCards = @toolFile.contact
-        const toolChoice = chooseFromList(@toolCards, "Media tools")
-        @tool = "{toolChoice}"
-        if @tool != "Back" {
-            if !@shared {
-                menu "Which one?" {
-                    item "Choose from Photos":
-                        @shared = selectPhotos()
-                    item "Choose from Files":
-                        @shared = selectFile()
-                    item "Latest in Photos":
-                        if @tool == "Convert image" {
-                            @shared = getLatestPhotos(1, false)
-                        } else {
-                            @shared = getLatestVideos(1)
-                        }
-                }
-            }
-            const sizeBefore = fileDetailOf(@shared, "File Size")
-            @result
-            if @tool == "Compress video" {
-                @sizes = list("Small · 540p", "Medium · 720p", "Large · 1080p", "HEVC 1080p · smallest file, sharp", "HEVC 4K · for 4K videos")
-                const sizePicked = chooseFromList(@sizes, "Compress to (now {sizeBefore})")
-                @size = "{sizePicked}"
-                if @size contains "HEVC 4K" {
-                    @result = encodeVideo(@shared, "HEVC 3840x2160")
-                }
-                if @size contains "HEVC 1080p" {
-                    @result = encodeVideo(@shared, "HEVC 1920×1080")
-                }
-                if @size contains "Small" {
-                    @result = encodeVideo(@shared, "960×540")
-                }
-                if @size contains "Medium" {
-                    @result = encodeVideo(@shared, "1280×720")
-                }
-                if @size contains "Large" {
-                    @result = encodeVideo(@shared, "1920×1080")
-                }
-            }
-            if @tool == "Trim" {
-                @result = trimVideo(@shared)
-            }
-            if @tool == "Make a GIF" {
-                @result = makeGIF(@shared)
-            }
-            if @tool == "Extract audio" {
-                @result = encodeAudio(@shared, "M4A")
-            }
-            if @tool == "Convert image" {
-                @imageFormats = list("JPEG", "PNG", "HEIF")
-                const formatPicked = chooseFromList(@imageFormats, "Convert to")
-                @imageFormat = "{formatPicked}"
-                if @imageFormat == "JPEG" {
-                    @result = convertToJPEG(@shared)
-                }
-                if @imageFormat == "PNG" {
-                    @result = convertImage(@shared, "PNG")
-                }
-                if @imageFormat == "HEIF" {
-                    @result = convertImage(@shared, "HEIF")
-                }
-            }
-            const sizeAfter = fileDetailOf(@result, "File Size")
-            menu "Done: {sizeBefore} → {sizeAfter}" {
-                item "Preview":
-                    quicklook(@result)
-                item "Save to Photos":
-                    savePhoto(@result)
-                    showNotification("Saved to Photos.", "AnyDL")
-                item "Save to Files":
-                    saveFilePrompt(@result)
-                item "Share":
-                    share(@result)
-            }
-        }
-    }
-
-    /* -------------------------------------------- My downloads. */
-    if @choiceName == "My downloads" {
-        const libraryFile = aShellGet("anydl_library.txt", false, true)
-        @libraryText = "{libraryFile}"
-        if !@libraryText {
-            alert("Nothing has been downloaded yet. Your downloads will appear here, and in Files › On My iPhone › a-Shell › AnyDL.", "My downloads")
+    /* -------------------------------------------- Home. */
+    if @view == "home" {
+        @homeItems: array
+        if @link {
+            @homeItems += "@@CARD(Video|Videos, clips and GIFs|video)@@"
+            @homeItems += "@@CARD(Audio|Music, or the sound of a video|audio)@@"
+            @homeItems += "@@CARD(Images|Photos, albums and image posts|gallery)@@"
+            @homeItems += "@@CARD(File|Documents, archives, anything linked|file)@@"
+            @homeItems += "@@CARD(More|Media tools, my downloads, settings|more)@@"
         } else {
-            const libraryLines = splitText("{@libraryText}", "\n")
-            @libraryLink = getFirstItem(libraryLines)
-            @librarySummary = getListItem(libraryLines, 2)
-            @libraryItems: array
-            @libraryItems += "@@CARD(Recent downloads|Download again or open the original link|recent)@@"
-            @libraryItems += "@@CARD(Open AnyDL folder|{@librarySummary}|library)@@"
-            @libraryItems += "@@CARD(Videos|Downloaded videos|video)@@"
-            @libraryItems += "@@CARD(Audio|Music and sound|music)@@"
-            @libraryItems += "@@CARD(Photos|Images and photo posts|photos)@@"
-            @libraryItems += "@@CARD(Files|Documents and other files|file)@@"
-            @libraryItems += "@@CARD(Playlists|One folder per playlist|playlists)@@"
-            @libraryItems += "@@CARD(Back|Return to the main menu|back)@@"
-            @libraryMenuText = "{@libraryItems}"
-            @libraryMenuFile = setName(@libraryMenuText, "library.vcf", true)
-            @libraryCards = @libraryMenuFile.contact
-            const libraryChoice = chooseFromList(@libraryCards, "My downloads")
-            @place = "{libraryChoice}"
-            if @place == "Open AnyDL folder" {
-                openURL("{@libraryLink}")
-                stop()
-            }
-            if @place == "Videos" || @place == "Audio" || @place == "Photos" || @place == "Files" || @place == "Playlists" {
-                openURL("{@libraryLink}/{@place}")
-                stop()
-            }
-            if @place == "Recent downloads" {
-                const historyFile = aShellGet("anydl_history.txt", false, true)
-                @historyText = "{historyFile}"
-                if !@historyText {
-                    alert("No downloads yet.", "Recent downloads")
-                } else {
-                    const historyLines = splitText("{@historyText}", "\n")
-                    const historyPicked = chooseFromList(historyLines, "Recent downloads")
-                    @historyLine = "{historyPicked}"
-                    const numberFound = matchText('^\d+', "{@historyLine}")
-                    const numberText = getFirstItem(numberFound)
-                    const historyNumber = number(numberText)
-                    menu "{@historyLine}" {
-                        item "Download again":
-                            const againText = "again\n{numberText}\n{@settings}"
-                            const againFile = setName(againText, "anydl_job.txt", true)
-                            aShellPut(scriptFile, true)
-                            aShellPut(againFile, true)
-                            aShellRun("cd $SHORTCUTS\npython anydl.py", "open", false)
-                            stop()
-                        item "Open the original link":
-                            const linksFile = aShellGet("anydl_history_links.txt", true, true)
-                            const historyLinks = splitText("{linksFile}", "\n")
-                            const originalLink = getListItem(historyLinks, historyNumber)
-                            openURL("{originalLink}")
-                            stop()
-                        item "Back":
-                            nothing()
-                    }
-                }
-            }
+            @homeItems += "@@CARD(Download a link|Paste a link to a video, song or file|link)@@"
+            @homeItems += "@@CARD(Media tools|Edit videos, photos and audio|tools)@@"
+            @homeItems += "@@CARD(My downloads|Recent downloads and your folders|library)@@"
+            @homeItems += "@@CARD(Settings|Quality, subtitles, storage and more|settings)@@"
         }
-    }
-
-    /* -------------------------------------------- Settings. */
-    if @choiceName == "Settings" {
-        const storageFile = aShellGet("anydl_library.txt", false, true)
-        const storageLines = splitText("{storageFile}", "\n")
-        @storage = getListItem(storageLines, 2)
-        if !@storage {
-            @storage = "No downloads yet"
+        @homeText = "{@homeItems}"
+        @homeFile = setName(@homeText, "home.vcf", true)
+        @homeCards = @homeFile.contact
+        const homeChoice = chooseFromList(@homeCards, @heading)
+        @menuPick = "{homeChoice}"
+        if @menuPick == "Video" {
+            @mode = "video"
         }
-        @signIn = getListItem(storageLines, 3)
-        if !@signIn {
-            @signIn = "Not set up"
-        }
-        @folderLink = getFirstItem(storageLines)
-        @settingsDone = false
-        repeat i for 30 {
-            if @settingsDone == false {
-                @settingItems: array
-                @settingItems += "@@CARD(Video quality|{@quality}|quality)@@"
-                @settingItems += "@@CARD(Frame rate|{@fps}|fps)@@"
-                @settingItems += "@@CARD(Video format|{@codec}|codec)@@"
-                @settingItems += "@@CARD(Audio format|{@audio}|music)@@"
-                @settingItems += "@@CARD(Subtitles|{@subtitles}|subtitles)@@"
-                @settingItems += "@@CARD(After download|{@after}|after)@@"
-                @settingItems += "@@CARD(Keep downloads|{@keep}|keep)@@"
-                @settingItems += "@@CARD(Clear downloads|{@storage}|clear)@@"
-                @settingItems += "@@CARD(YouTube sign-in|{@signIn} · for the bot check|signin)@@"
-                @settingItems += "@@CARD(Updates|Automatic checks: {@updates} · Check now|updates)@@"
-                @settingItems += "@@CARD(Help & setup guide|How to set up and use AnyDL|help)@@"
-                @settingItems += "@@CARD(Back|Return to the main menu|back)@@"
-                @settingText = "{@settingItems}"
-                @settingFile = setName(@settingText, "settings.vcf", true)
-                @settingCards = @settingFile.contact
-                const settingChoice = chooseFromList(@settingCards, "Settings · AnyDL __VERSION__")
-                @setting = "{settingChoice}"
-                if @setting == "Video quality" {
-                    @qualities = list("Best", "4K (2160p)", "1440p", "1080p", "720p", "480p", "360p (Data saver)", "240p", "Ask each time")
-                    @quality = chooseFromList(@qualities, "Video quality. Upright and wide videos alike; if a video has no such size, the closest smaller one is used.")
-                }
-                if @setting == "Frame rate" {
-                    @rates = list("Any", "Up to 60 fps", "Up to 30 fps")
-                    @fps = chooseFromList(@rates, "Frame rate. Lower frame rates make smaller files.")
-                }
-                if @setting == "Video format" {
-                    @codecs = list("Most compatible", "Highest quality")
-                    @codec = chooseFromList(@codecs, "Most compatible: H.264, plays everywhere including Photos; YouTube offers it up to 1080p. Highest quality: also VP9 and AV1, needed for YouTube 1440p and 4K; may not play in every app.")
-                }
-                if @setting == "Audio format" {
-                    @audioFormats = list("Original", "MP3")
-                    @audio = chooseFromList(@audioFormats, "Audio format. MP3 adds the cover image and title.")
-                }
-                if @setting == "Subtitles" {
-                    @languages = list("Off", "English", "Dutch", "German", "French", "Spanish", "Portuguese", "Italian", "Polish", "Turkish", "Arabic", "Hindi", "Indonesian", "Japanese", "Korean", "Chinese")
-                    @subtitles = chooseFromList(@languages, "Subtitles built into downloaded videos. While a video plays, turn them on with the captions button. YouTube sometimes keeps them from downloaders; a-Shell says after each download whether they were added.")
-                }
-                if @setting == "After download" {
-                    @afterModes = list("Preview", "Save to Photos", "Keep in Files")
-                    @after = chooseFromList(@afterModes, "After download. Save to Photos works for photos and videos up to 50 MB; bigger ones open in a preview. Everything is also kept in Files.")
-                }
-                if @setting == "Keep downloads" {
-                    @keepModes = list("Forever", "1 month", "1 week", "1 day")
-                    @keep = chooseFromList(@keepModes, "Delete downloads from the AnyDL folder automatically after:")
-                }
-                if @setting == "Clear downloads" {
-                    menu "Clear downloads ({@storage})" {
-                        item "Delete everything":
-                            @clearWhat = "all"
-                        item "Delete downloads older than a week":
-                            @clearWhat = "old"
-                        item "Cancel":
-                            @clearWhat = ""
-                    }
-                    if @clearWhat {
-                        const clearText = "clear\n{@clearWhat}"
-                        const clearFile = setName(clearText, "anydl_job.txt", true)
-                        aShellPut(scriptFile, true)
-                        aShellPut(clearFile, true)
-                        aShellRun("cd $SHORTCUTS\npython anydl.py", "open", false)
-                        stop()
-                    }
-                }
-                if @setting == "Updates" {
-                    menu "Updates · you have AnyDL __VERSION__" {
-                        item "Check now":
-                            const releaseData = downloadURL("https://api.github.com/repos/h4sw5q2wr9-byte/AnyDL/releases/latest")
-                            const release = getDictionary(releaseData)
-                            @latestTag = "{release['tag_name']}"
-                            const tagFound = matchText('\d+\.\d+', "{@latestTag}")
-                            const tagText = getFirstItem(tagFound)
-                            const tagParts = splitText("{tagText}", ".")
-                            const majorText = getFirstItem(tagParts)
-                            const minorText = getLastItem(tagParts)
-                            @latestNumber = number(majorText)
-                            @latestNumber *= 1000
-                            const minorNumber = number(minorText)
-                            @latestNumber += minorNumber
-                            @currentNumber = __VERSION_NUM__
-                            if @latestNumber > @currentNumber {
-                                menu "AnyDL {tagText} is available (you have __VERSION__)" {
-                                    item "Update now":
-                                        openURL("https://github.com/h4sw5q2wr9-byte/AnyDL/releases/latest")
-                                        stop()
-                                    item "Later":
-                                        nothing()
-                                }
-                            } else {
-                                alert("You have the latest version, AnyDL __VERSION__.", "Updates")
-                            }
-                        item "Automatic checks: On":
-                            @updates = "On"
-                        item "Automatic checks: Off":
-                            @updates = "Off"
-                    }
-                }
-                if @setting == "YouTube sign-in" {
-                    menu "If YouTube keeps saying it thinks you are a bot, AnyDL can sign in with a cookies.txt from a browser where you are signed in to YouTube. Put the file in Files › a-Shell › AnyDL. Use a second Google account: YouTube may limit accounts used by downloaders." {
-                        item "How to get cookies.txt":
-                            openURL("https://github.com/h4sw5q2wr9-byte/AnyDL#youtube-says-im-a-bot")
-                            stop()
-                        item "Open the AnyDL folder":
-                            openURL("{@folderLink}")
-                            stop()
-                        item "Back":
-                            nothing()
-                    }
-                }
-                if @setting == "Help & setup guide" {
-                    quicklook(welcomePage)
-                }
-                if @setting == "Back" {
-                    @settingsDone = true
-                }
-                @settings = "quality={@quality}\nfps={@fps}\ncodec={@codec}\naudio={@audio}\nsubtitles={@subtitles}\nafter={@after}\nkeep={@keep}\nupdates={@updates}"
-                const newSettingsFile = setName(@settings, "anydl_settings.txt", true)
-                aShellPut(newSettingsFile, true)
-            }
-        }
-    }
-
-    /* -------------------------------------------- Downloads. */
-    if @choiceName beginsWith "Download " {
-        if !@link {
-            @link = prompt("Paste the link to download", "URL")
-        }
-        @mode = "video"
-        if @choiceName == "Download Audio" {
+        if @menuPick == "Audio" {
             @mode = "audio"
         }
-        if @choiceName == "Download Gallery" {
+        if @menuPick == "Images" {
             @mode = "gallery"
         }
-        if @choiceName == "Download File" {
+        if @menuPick == "File" {
             @mode = "file"
         }
+        if @menuPick == "More" {
+            @view = "more"
+        }
+        if @menuPick == "Download a link" {
+            @link = prompt("Paste the link to download", "URL")
+            const pastedSite = getURLDetail("{@link}", "Host")
+            @heading = "Download from {pastedSite}"
+        }
+        if @menuPick == "Media tools" {
+            @view = "tools"
+        }
+        if @menuPick == "My downloads" {
+            @view = "library"
+        }
+        if @menuPick == "Settings" {
+            @view = "settings"
+        }
+    }
 
+    if @view == "more" {
+        @moreItems: array
+        @moreItems += "@@CARD(Media tools|Edit videos, photos and audio|tools)@@"
+        @moreItems += "@@CARD(My downloads|Recent downloads and your folders|library)@@"
+        @moreItems += "@@CARD(Settings|Quality, subtitles, storage and more|settings)@@"
+        @moreItems += "@@CARD(Back|To the download menu|back)@@"
+        @moreText = "{@moreItems}"
+        @moreFile = setName(@moreText, "more.vcf", true)
+        @moreCards = @moreFile.contact
+        const moreChoice = chooseFromList(@moreCards, "More")
+        @menuPick = "{moreChoice}"
+        @view = "home"
+        if @menuPick == "Media tools" {
+            @view = "tools"
+        }
+        if @menuPick == "My downloads" {
+            @view = "library"
+        }
+        if @menuPick == "Settings" {
+            @view = "settings"
+        }
+    }
+
+    /* -------------------------------------------- Download. */
+    if @mode {
         /* Video quality for this download, when the setting says to ask. */
         @extra = ""
         if @mode == "video" {
@@ -574,7 +338,6 @@ repeat round for 30 {
                 @extra = "quality={@pickedQuality}"
             }
         }
-
         /* Hand the downloader script and the job to a-Shell, and start it.
            This shortcut ends here; a-Shell shows the result, or starts
            AnyDL again when it needs to. */
@@ -584,5 +347,702 @@ repeat round for 30 {
         aShellPut(jobFile, true)
         aShellRun("cd $SHORTCUTS\npython anydl.py", "open", false)
         stop()
+    }
+
+    /* -------------------------------------------- Media tools. */
+    /* iOS's own actions: fast, no a-Shell. A shared file is sorted by its
+       file extension, so each tool only ever gets the kind it can handle. */
+    if @view == "tools" {
+        if @shared {
+            if !@sharedKind {
+                const sharedExtension = fileDetailOf(@shared, "File Extension")
+                @extension = lowercase("{sharedExtension}")
+                @sharedKind = "other"
+                if @videoTypes contains @extension {
+                    @sharedKind = "video"
+                }
+                if @photoTypes contains @extension {
+                    @sharedKind = "photo"
+                }
+                if @audioTypes contains @extension {
+                    @sharedKind = "audio"
+                }
+                if !@extension {
+                    @sharedKind = "other"
+                }
+            }
+            if @sharedKind == "video" {
+                @view = "tools-video"
+            }
+            if @sharedKind == "photo" {
+                @view = "tools-photo"
+            }
+            if @sharedKind == "audio" {
+                @view = "tools-audio"
+            }
+        }
+    }
+    if @view == "tools" {
+        @toolItems: array
+        @toolItems += "@@CARD(Video tools|Compress, trim, speed, rotate, GIF, audio|video)@@"
+        @toolItems += "@@CARD(Photo tools|Compress, resize, convert, background, privacy|gallery)@@"
+        @toolItems += "@@CARD(Audio tools|Trim, convert, speed|audio)@@"
+        @toolItems += "@@CARD(Back|To the main menu|back)@@"
+        @toolText = "{@toolItems}"
+        @toolFile = setName(@toolText, "tools.vcf", true)
+        @toolCards = @toolFile.contact
+        const toolsChoice = chooseFromList(@toolCards, "Media tools")
+        @menuPick = "{toolsChoice}"
+        @view = "home"
+        if @menuPick == "Video tools" {
+            @view = "tools-video"
+        }
+        if @menuPick == "Photo tools" {
+            @view = "tools-photo"
+        }
+        if @menuPick == "Audio tools" {
+            @view = "tools-audio"
+        }
+        @shared = nil
+        @sharedKind = ""
+    }
+
+    @result = nil
+    @resultKind = ""
+
+    /* Video tools. */
+    if @view == "tools-video" {
+        @videoItems: array
+        @videoItems += "@@CARD(Compress video|Make it smaller to share or save space|compress)@@"
+        @videoItems += "@@CARD(Trim|Cut it shorter|trim)@@"
+        @videoItems += "@@CARD(Change speed|Slow motion or double speed|fps)@@"
+        @videoItems += "@@CARD(Rotate|Turn it a quarter or half turn|rotate)@@"
+        @videoItems += "@@CARD(Make a GIF|An animated GIF from the video|gif)@@"
+        @videoItems += "@@CARD(Extract audio|Save its sound as M4A|extract)@@"
+        @videoItems += "@@CARD(Back|To Media tools|back)@@"
+        @videoText = "{@videoItems}"
+        @videoMenuFile = setName(@videoText, "video-tools.vcf", true)
+        @videoCards = @videoMenuFile.contact
+        const videoChoice = chooseFromList(@videoCards, "Video tools")
+        @tool = "{videoChoice}"
+        if @tool == "Back" {
+            @view = "tools"
+            @shared = nil
+            @sharedKind = ""
+        } else {
+            @media = nil
+            if @sharedKind == "video" {
+                @media = @shared
+            } else {
+                menu "Which video?" {
+                    item "Choose from Photos":
+                        @media = pickVideoFromPhotos()
+                    item "Choose from Files":
+                        @media = selectFile()
+                    item "Latest video in Photos":
+                        @media = getLatestVideos(1)
+                }
+            }
+            const videoExtension = fileDetailOf(@media, "File Extension")
+            @extension = lowercase("{videoExtension}")
+            if @videoTypes !contains @extension {
+                alert("That file is not a video (.{@extension}). Choose a video, or use Photo tools or Audio tools.", "Video tools")
+            } else {
+                const videoSizeBefore = fileDetailOf(@media, "File Size")
+                @sizeBefore = "{videoSizeBefore}"
+                @resultKind = "video"
+                if @tool == "Compress video" {
+                    @compressions = list("Small · 540p, the smallest file", "Medium · 720p, good for sharing", "HEVC · same 1080p, about half the size", "Large · 1080p, for 4K videos", "HEVC 4K · for 4K videos")
+                    const compressPicked = chooseFromList(@compressions, "Compress (now {@sizeBefore}). A lower resolution saves the most; HEVC keeps the resolution.")
+                    @compression = "{compressPicked}"
+                    showNotification("Compressing… the result opens when it is done.", "AnyDL", false)
+                    if @compression contains "HEVC 4K" {
+                        @result = encodeVideo(@media, "HEVC 3840x2160")
+                    }
+                    if @compression contains "HEVC · same 1080p" {
+                        @result = encodeVideo(@media, "HEVC 1920×1080")
+                    }
+                    if @compression contains "Small" {
+                        @result = encodeVideo(@media, "960×540")
+                    }
+                    if @compression contains "Medium" {
+                        @result = encodeVideo(@media, "1280×720")
+                    }
+                    if @compression contains "Large" {
+                        @result = encodeVideo(@media, "1920×1080")
+                    }
+                }
+                if @tool == "Trim" {
+                    @result = trimVideo(@media)
+                }
+                if @tool == "Change speed" {
+                    @speeds = list("Half speed · slow motion", "Double speed")
+                    const speedPicked = chooseFromList(@speeds, "Change speed")
+                    @speed = "{speedPicked}"
+                    showNotification("Changing the speed… the result opens when it is done.", "AnyDL", false)
+                    if @speed contains "Half" {
+                        @result = encodeVideo(@media, nil, "0.5X")
+                    } else {
+                        @result = encodeVideo(@media, nil, "2X")
+                    }
+                }
+                if @tool == "Rotate" {
+                    @turns = list("Turn right", "Turn left", "Upside down")
+                    const turnPicked = chooseFromList(@turns, "Rotate")
+                    @turn = "{turnPicked}"
+                    if @turn == "Turn right" {
+                        @result = rotateMedia(@media, "90")
+                    }
+                    if @turn == "Turn left" {
+                        @result = rotateMedia(@media, "270")
+                    }
+                    if @turn == "Upside down" {
+                        @result = rotateMedia(@media, "180")
+                    }
+                }
+                if @tool == "Make a GIF" {
+                    showNotification("Making the GIF… the result opens when it is done.", "AnyDL", false)
+                    @result = makeGIF(@media)
+                    @resultKind = "photo"
+                }
+                if @tool == "Extract audio" {
+                    showNotification("Extracting the audio…", "AnyDL", false)
+                    @result = encodeAudio(@media, "M4A")
+                    @resultKind = "audio"
+                }
+            }
+        }
+    }
+
+    /* Photo tools. */
+    if @view == "tools-photo" {
+        @photoItems: array
+        @photoItems += "@@CARD(Compress photo|Make it smaller to share or save space|photocompress)@@"
+        @photoItems += "@@CARD(Resize|Fewer pixels: 1080 px, 2048 px, half, quarter|resize)@@"
+        @photoItems += "@@CARD(Convert|To JPEG, PNG or HEIF|convert)@@"
+        @photoItems += "@@CARD(Remove background|Keep only the subject|removebg)@@"
+        @photoItems += "@@CARD(Remove location & info|Strip where and how it was taken|privacy)@@"
+        @photoItems += "@@CARD(Rotate or flip|Turn or mirror it|flip)@@"
+        @photoItems += "@@CARD(Back|To Media tools|back)@@"
+        @photoText = "{@photoItems}"
+        @photoMenuFile = setName(@photoText, "photo-tools.vcf", true)
+        @photoCards = @photoMenuFile.contact
+        const photoChoice = chooseFromList(@photoCards, "Photo tools")
+        @tool = "{photoChoice}"
+        if @tool == "Back" {
+            @view = "tools"
+            @shared = nil
+            @sharedKind = ""
+        } else {
+            @media = nil
+            if @sharedKind == "photo" {
+                @media = @shared
+            } else {
+                menu "Which photo?" {
+                    item "Choose from Photos":
+                        @media = pickImageFromPhotos()
+                    item "Choose from Files":
+                        @media = selectFile()
+                    item "Latest photo":
+                        @media = getLatestPhotos(1, false)
+                }
+            }
+            const photoExtension = fileDetailOf(@media, "File Extension")
+            @extension = lowercase("{photoExtension}")
+            if @photoTypes !contains @extension {
+                alert("That file is not a photo (.{@extension}). Choose a photo, or use Video tools or Audio tools.", "Photo tools")
+            } else {
+                const photoSizeBefore = fileDetailOf(@media, "File Size")
+                @sizeBefore = "{photoSizeBefore}"
+                @resultKind = "photo"
+                /* The longest side, to never make a photo bigger. */
+                const photoWidth = getImageDetail(@media, "Width")
+                const photoHeight = getImageDetail(@media, "Height")
+                @longest = number(photoWidth)
+                const heightNumber = number(photoHeight)
+                if heightNumber > @longest {
+                    @longest = number(photoHeight)
+                }
+                if @tool == "Compress photo" {
+                    @photoSizes = list("Small · 1280 px, JPEG", "Medium · 2048 px, JPEG", "Full size · JPEG", "Full size · HEIF, the smallest file")
+                    const photoSizePicked = chooseFromList(@photoSizes, "Compress (now {@sizeBefore}, {@longest} px on the longest side)")
+                    @photoSize = "{photoSizePicked}"
+                    @scaled = @media
+                    if @photoSize contains "1280" {
+                        if @longest > 1280 {
+                            @scaled = resizeImageByLongestEdge(@media, "1280")
+                        }
+                    }
+                    if @photoSize contains "2048" {
+                        if @longest > 2048 {
+                            @scaled = resizeImageByLongestEdge(@media, "2048")
+                        }
+                    }
+                    if @photoSize contains "HEIF" {
+                        @result = convertImage(@scaled, "HEIF", 0.7)
+                    } else {
+                        @result = convertToJPEG(@scaled, 0.7)
+                    }
+                }
+                if @tool == "Resize" {
+                    @resizes = list("1080 px on the longest side", "2048 px on the longest side", "Half size", "Quarter size")
+                    const resizePicked = chooseFromList(@resizes, "Resize (now {@longest} px on the longest side)")
+                    @resizeTo = "{resizePicked}"
+                    if @resizeTo contains "1080" {
+                        @result = resizeImageByLongestEdge(@media, "1080")
+                    }
+                    if @resizeTo contains "2048" {
+                        @result = resizeImageByLongestEdge(@media, "2048")
+                    }
+                    if @resizeTo == "Half size" {
+                        @result = resizeImageByPercent(@media, "50")
+                    }
+                    if @resizeTo == "Quarter size" {
+                        @result = resizeImageByPercent(@media, "25")
+                    }
+                }
+                if @tool == "Convert" {
+                    @imageFormats = list("JPEG", "PNG", "HEIF")
+                    const formatPicked = chooseFromList(@imageFormats, "Convert to")
+                    @imageFormat = "{formatPicked}"
+                    if @imageFormat == "JPEG" {
+                        @result = convertToJPEG(@media, 0.9)
+                    }
+                    if @imageFormat == "PNG" {
+                        @result = convertImage(@media, "PNG")
+                    }
+                    if @imageFormat == "HEIF" {
+                        @result = convertImage(@media, "HEIF", 0.9)
+                    }
+                }
+                if @tool == "Remove background" {
+                    showNotification("Removing the background…", "AnyDL", false)
+                    @result = removeBackground(@media, true)
+                }
+                if @tool == "Remove location & info" {
+                    @result = stripImageMetadata(@media)
+                }
+                if @tool == "Rotate or flip" {
+                    @flips = list("Turn right", "Turn left", "Upside down", "Mirror left to right", "Mirror top to bottom")
+                    const flipPicked = chooseFromList(@flips, "Rotate or flip")
+                    @flip = "{flipPicked}"
+                    if @flip == "Turn right" {
+                        @result = rotateMedia(@media, "90")
+                    }
+                    if @flip == "Turn left" {
+                        @result = rotateMedia(@media, "270")
+                    }
+                    if @flip == "Upside down" {
+                        @result = rotateMedia(@media, "180")
+                    }
+                    if @flip == "Mirror left to right" {
+                        @result = flipImage(@media, "Horizontal")
+                    }
+                    if @flip == "Mirror top to bottom" {
+                        @result = flipImage(@media, "Vertical")
+                    }
+                }
+            }
+        }
+    }
+
+    /* Audio tools. */
+    if @view == "tools-audio" {
+        @audioItems: array
+        @audioItems += "@@CARD(Trim|Cut a song or recording shorter|trim)@@"
+        @audioItems += "@@CARD(Convert|To M4A or AIFF|convert)@@"
+        @audioItems += "@@CARD(Change speed|Half or double speed|fps)@@"
+        @audioItems += "@@CARD(Back|To Media tools|back)@@"
+        @audioText = "{@audioItems}"
+        @audioMenuFile = setName(@audioText, "audio-tools.vcf", true)
+        @audioCards = @audioMenuFile.contact
+        const audioChoice = chooseFromList(@audioCards, "Audio tools")
+        @tool = "{audioChoice}"
+        if @tool == "Back" {
+            @view = "tools"
+            @shared = nil
+            @sharedKind = ""
+        } else {
+            @media = nil
+            if @sharedKind == "audio" {
+                @media = @shared
+            } else {
+                menu "Which audio?" {
+                    item "Choose from Files":
+                        @media = selectFile()
+                    item "The sound of a video in Photos":
+                        const soundVideo = pickVideoFromPhotos()
+                        showNotification("Getting the sound…", "AnyDL", false)
+                        @media = encodeAudio(soundVideo, "M4A")
+                }
+            }
+            const audioExtension = fileDetailOf(@media, "File Extension")
+            @extension = lowercase("{audioExtension}")
+            if @audioTypes !contains @extension {
+                alert("That file is not audio (.{@extension}). Choose an audio file, or use Video tools or Photo tools.", "Audio tools")
+            } else {
+                const audioSizeBefore = fileDetailOf(@media, "File Size")
+                @sizeBefore = "{audioSizeBefore}"
+                @resultKind = "audio"
+                if @tool == "Trim" {
+                    @result = trimVideo(@media)
+                }
+                if @tool == "Convert" {
+                    @audioFormats = list("M4A", "AIFF")
+                    const audioFormatPicked = chooseFromList(@audioFormats, "Convert to")
+                    @audioFormat = "{audioFormatPicked}"
+                    showNotification("Converting…", "AnyDL", false)
+                    if @audioFormat == "AIFF" {
+                        @result = encodeAudio(@media, "AIFF")
+                    } else {
+                        @result = encodeAudio(@media, "M4A")
+                    }
+                }
+                if @tool == "Change speed" {
+                    @audioSpeeds = list("Half speed", "Double speed")
+                    const audioSpeedPicked = chooseFromList(@audioSpeeds, "Change speed")
+                    @audioSpeed = "{audioSpeedPicked}"
+                    showNotification("Changing the speed…", "AnyDL", false)
+                    if @audioSpeed == "Half speed" {
+                        @result = encodeAudio(@media, "M4A", "0.5X")
+                    } else {
+                        @result = encodeAudio(@media, "M4A", "2X")
+                    }
+                }
+            }
+        }
+    }
+
+    /* The result of any tool: show the size change and what to do with it.
+       Edit more keeps the result for the next tool. */
+    if @result {
+        const sizeAfterDetail = fileDetailOf(@result, "File Size")
+        @sizeAfter = "{sizeAfterDetail}"
+        if @resultKind == "audio" {
+            menu "Done · {@sizeBefore} → {@sizeAfter}" {
+                item "Preview":
+                    quicklook(@result)
+                item "Save to Files":
+                    saveFilePrompt(@result)
+                item "Share":
+                    share(@result)
+                item "Edit more":
+                    @shared = @result
+                    @sharedKind = "audio"
+                    @view = "tools-audio"
+            }
+        } else {
+            menu "Done · {@sizeBefore} → {@sizeAfter}" {
+                item "Preview":
+                    quicklook(@result)
+                item "Save to Photos":
+                    savePhoto(@result)
+                    showNotification("Saved to Photos.", "AnyDL", false)
+                item "Save to Files":
+                    saveFilePrompt(@result)
+                item "Share":
+                    share(@result)
+                item "Edit more":
+                    @shared = @result
+                    @sharedKind = @resultKind
+                    if @resultKind == "video" {
+                        @view = "tools-video"
+                    } else {
+                        @view = "tools-photo"
+                    }
+            }
+        }
+    }
+
+    /* Facts about the AnyDL folder, read from a-Shell when first needed. */
+    if @libraryLoaded == false {
+        if @view == "library" || @view == "folders" || @view == "settings" || @view == "storage" {
+            const libraryFile = aShellGet("anydl_library.txt", false, true)
+            @libraryText = "{libraryFile}"
+            const linkFound = matchText('shareddocuments://[^\n]+', "{@libraryText}")
+            @libraryLink = getFirstItem(linkFound)
+            const summaryFound = matchText('[0-9]+ files? · [^\n]+|No downloads yet', "{@libraryText}")
+            @librarySummary = getFirstItem(summaryFound)
+            if !@librarySummary {
+                @librarySummary = "No downloads yet"
+            }
+            @signIn = "Not set up"
+            if @libraryText contains "cookies.txt found" {
+                @signIn = "cookies.txt found"
+            }
+            @libraryLoaded = true
+        }
+    }
+
+    /* -------------------------------------------- My downloads. */
+    if @view == "library" {
+        @libraryItems: array
+        @libraryItems += "@@CARD(Recent downloads|Download again or open the original link|recent)@@"
+        @libraryItems += "@@CARD(Browse folders|{@librarySummary}|folders)@@"
+        @libraryItems += "@@CARD(Back|To the main menu|back)@@"
+        @libraryMenuText = "{@libraryItems}"
+        @libraryMenuFile = setName(@libraryMenuText, "library.vcf", true)
+        @libraryCards = @libraryMenuFile.contact
+        const libraryChoice = chooseFromList(@libraryCards, "My downloads")
+        @menuPick = "{libraryChoice}"
+        @view = "home"
+        if @menuPick == "Browse folders" {
+            @view = "folders"
+        }
+        if @menuPick == "Recent downloads" {
+            @view = "library"
+            const historyFile = aShellGet("anydl_history.txt", false, true)
+            @historyText = "{historyFile}"
+            if !@historyText {
+                alert("Nothing has been downloaded yet.", "Recent downloads")
+            } else {
+                const historyLines = splitText("{@historyText}", "\n")
+                const historyPicked = chooseFromList(historyLines, "Recent downloads")
+                @historyLine = "{historyPicked}"
+                const numberFound = matchText('^[0-9]+', "{@historyLine}")
+                const numberText = getFirstItem(numberFound)
+                const historyNumber = number(numberText)
+                menu "{@historyLine}" {
+                    item "Download again":
+                        aShellPut(scriptFile, true)
+                        const againText = "again\n{numberText}\n{@settings}"
+                        const againFile = setName(againText, "anydl_job.txt", true)
+                        aShellPut(againFile, true)
+                        aShellRun("cd $SHORTCUTS\npython anydl.py", "open", false)
+                        stop()
+                    item "Open the original link":
+                        const linksFile = aShellGet("anydl_history_links.txt", false, true)
+                        const historyLinks = splitText("{linksFile}", "\n")
+                        const linkCount = count(historyLinks)
+                        if historyNumber > linkCount {
+                            alert("That link is no longer in the history.", "Recent downloads")
+                        } else {
+                            const originalLink = getListItem(historyLinks, historyNumber)
+                            openURL("{originalLink}")
+                            stop()
+                        }
+                    item "Back":
+                        nothing()
+                }
+            }
+        }
+    }
+
+    if @view == "folders" {
+        if !@libraryLink {
+            alert("Nothing has been downloaded yet. Your downloads will appear in Files › On My iPhone › a-Shell › AnyDL.", "My downloads")
+            @view = "library"
+        } else {
+            @folderItems: array
+            @folderItems += "@@CARD(All downloads|{@librarySummary}|library)@@"
+            @folderItems += "@@CARD(Videos|Downloaded videos|video)@@"
+            @folderItems += "@@CARD(Audio|Music and sound|music)@@"
+            @folderItems += "@@CARD(Photos|Images and photo posts|photos)@@"
+            @folderItems += "@@CARD(Files|Documents and other files|file)@@"
+            @folderItems += "@@CARD(Playlists|One folder per playlist|playlists)@@"
+            @folderItems += "@@CARD(Back|To My downloads|back)@@"
+            @folderMenuText = "{@folderItems}"
+            @folderMenuFile = setName(@folderMenuText, "folders.vcf", true)
+            @folderCards = @folderMenuFile.contact
+            const folderChoice = chooseFromList(@folderCards, "Open in Files")
+            @menuPick = "{folderChoice}"
+            @view = "library"
+            if @menuPick == "All downloads" {
+                openURL("{@libraryLink}")
+                stop()
+            }
+            if @menuPick == "Videos" || @menuPick == "Audio" || @menuPick == "Photos" || @menuPick == "Files" || @menuPick == "Playlists" {
+                openURL("{@libraryLink}/{@menuPick}")
+                stop()
+            }
+        }
+    }
+
+    /* -------------------------------------------- Settings. */
+    @settingsChanged = false
+    if @view == "settings" {
+        @settingItems: array
+        @settingItems += "@@CARD(Downloads|{@quality} · {@fps} · {@audio} audio · subtitles {@subtitles}|downloads)@@"
+        @settingItems += "@@CARD(After download|{@after}|after)@@"
+        @settingItems += "@@CARD(Storage|{@librarySummary} · keep {@keep}|storage)@@"
+        @settingItems += "@@CARD(YouTube sign-in|{@signIn} · for the bot check|signin)@@"
+        @settingItems += "@@CARD(Updates|Automatic checks {@updates} · Check now|updates)@@"
+        @settingItems += "@@CARD(Help & about|AnyDL __VERSION__ · setup guide|help)@@"
+        @settingItems += "@@CARD(Back|To the main menu|back)@@"
+        @settingText = "{@settingItems}"
+        @settingFile = setName(@settingText, "settings.vcf", true)
+        @settingCards = @settingFile.contact
+        const settingChoice = chooseFromList(@settingCards, "Settings")
+        @setting = "{settingChoice}"
+        if @setting == "Back" {
+            @view = "home"
+        }
+        if @setting == "Downloads" {
+            @view = "settings-downloads"
+        }
+        if @setting == "Storage" {
+            @view = "storage"
+        }
+        if @setting == "After download" {
+            @afterModes = list("Preview", "Save to Photos", "Keep in Files")
+            @after = chooseFromList(@afterModes, "After download. Save to Photos works for photos and videos up to 50 MB; bigger ones open in a preview. Everything is also kept in Files.")
+            @settingsChanged = true
+        }
+        if @setting == "YouTube sign-in" {
+            menu "If YouTube keeps saying it thinks you are a bot, AnyDL can sign in with a cookies.txt from a browser where you are signed in to YouTube. Put the file in Files › a-Shell › AnyDL. Use a second Google account: YouTube may limit accounts used by downloaders." {
+                item "How to get cookies.txt":
+                    openURL("https://github.com/h4sw5q2wr9-byte/AnyDL#youtube-says-im-a-bot")
+                    stop()
+                item "Open the AnyDL folder":
+                    if @libraryLink {
+                        openURL("{@libraryLink}")
+                        stop()
+                    } else {
+                        alert("The AnyDL folder appears after the first download.", "YouTube sign-in")
+                    }
+                item "Back":
+                    nothing()
+            }
+        }
+        if @setting == "Updates" {
+            menu "Updates · you have AnyDL __VERSION__" {
+                item "Check now":
+                    const releaseData = downloadURL("https://api.github.com/repos/h4sw5q2wr9-byte/AnyDL/releases/latest")
+                    const release = getDictionary(releaseData)
+                    @latestTag = "{release['tag_name']}"
+                    const tagFound = matchText('[0-9]+\.[0-9]+', "{@latestTag}")
+                    const tagText = getFirstItem(tagFound)
+                    if !tagText {
+                        alert("Could not reach GitHub. Check your connection and try again.", "Updates")
+                    } else {
+                        const tagParts = splitText("{tagText}", ".")
+                        const majorText = getFirstItem(tagParts)
+                        const minorText = getLastItem(tagParts)
+                        @latestNumber = number(majorText)
+                        @latestNumber *= 1000
+                        const minorNumber = number(minorText)
+                        @latestNumber += minorNumber
+                        @currentNumber = __VERSION_NUM__
+                        if @latestNumber > @currentNumber {
+                            menu "AnyDL {tagText} is available (you have __VERSION__)" {
+                                item "Update now":
+                                    openURL("https://github.com/h4sw5q2wr9-byte/AnyDL/releases/latest")
+                                    stop()
+                                item "Later":
+                                    nothing()
+                            }
+                        } else {
+                            alert("You have the latest version, AnyDL __VERSION__.", "Updates")
+                        }
+                    }
+                item "Automatic checks: On":
+                    @updates = "On"
+                    @settingsChanged = true
+                item "Automatic checks: Off":
+                    @updates = "Off"
+                    @settingsChanged = true
+            }
+        }
+        if @setting == "Help & about" {
+            quicklook(welcomePage)
+        }
+    }
+
+    if @view == "settings-downloads" {
+        @downloadItems: array
+        @downloadItems += "@@CARD(Video quality|{@quality}|quality)@@"
+        @downloadItems += "@@CARD(Frame rate|{@fps}|fps)@@"
+        @downloadItems += "@@CARD(Video format|{@codec}|codec)@@"
+        @downloadItems += "@@CARD(Audio format|{@audio}|music)@@"
+        @downloadItems += "@@CARD(Subtitles|{@subtitles}|subtitles)@@"
+        @downloadItems += "@@CARD(Back|To Settings|back)@@"
+        @downloadText = "{@downloadItems}"
+        @downloadFile = setName(@downloadText, "download-settings.vcf", true)
+        @downloadCards = @downloadFile.contact
+        const downloadChoice = chooseFromList(@downloadCards, "Download settings")
+        @setting = "{downloadChoice}"
+        if @setting == "Back" {
+            @view = "settings"
+        }
+        if @setting == "Video quality" {
+            @qualities = list("Best", "4K (2160p)", "1440p", "1080p", "720p", "480p", "360p (Data saver)", "240p", "Ask each time")
+            @quality = chooseFromList(@qualities, "Video quality. Upright and wide videos alike; if a video has no such size, the closest smaller one is used.")
+            @settingsChanged = true
+        }
+        if @setting == "Frame rate" {
+            @rates = list("Any", "Up to 60 fps", "Up to 30 fps")
+            @fps = chooseFromList(@rates, "Frame rate. Lower frame rates make smaller files.")
+            @settingsChanged = true
+        }
+        if @setting == "Video format" {
+            @codecs = list("Most compatible", "Highest quality")
+            @codec = chooseFromList(@codecs, "Most compatible: H.264, plays everywhere including Photos; YouTube offers it up to 1080p. Highest quality: also VP9 and AV1, needed for YouTube 1440p and 4K; may not play in every app.")
+            @settingsChanged = true
+        }
+        if @setting == "Audio format" {
+            @audioFormatChoices = list("Original", "MP3")
+            @audio = chooseFromList(@audioFormatChoices, "Audio format. MP3 adds the cover image and title.")
+            @settingsChanged = true
+        }
+        if @setting == "Subtitles" {
+            @languages = list("Off", "English", "Dutch", "German", "French", "Spanish", "Portuguese", "Italian", "Polish", "Turkish", "Arabic", "Hindi", "Indonesian", "Japanese", "Korean", "Chinese")
+            @subtitles = chooseFromList(@languages, "Subtitles built into downloaded videos. While a video plays, turn them on with the captions button. YouTube sometimes keeps them from downloaders; a-Shell says after each download whether they were added.")
+            @settingsChanged = true
+        }
+    }
+
+    if @view == "storage" {
+        @storageItems: array
+        @storageItems += "@@CARD(Keep downloads|{@keep}|keep)@@"
+        @storageItems += "@@CARD(Clear downloads|{@librarySummary}|clear)@@"
+        @storageItems += "@@CARD(Open AnyDL folder|In Files › a-Shell › AnyDL|folders)@@"
+        @storageItems += "@@CARD(Back|To Settings|back)@@"
+        @storageText = "{@storageItems}"
+        @storageFile = setName(@storageText, "storage.vcf", true)
+        @storageCards = @storageFile.contact
+        const storageChoice = chooseFromList(@storageCards, "Storage")
+        @setting = "{storageChoice}"
+        if @setting == "Back" {
+            @view = "settings"
+        }
+        if @setting == "Keep downloads" {
+            @keepModes = list("Forever", "1 month", "1 week", "1 day")
+            @keep = chooseFromList(@keepModes, "Delete downloads from the AnyDL folder automatically after:")
+            @settingsChanged = true
+        }
+        if @setting == "Open AnyDL folder" {
+            if @libraryLink {
+                openURL("{@libraryLink}")
+                stop()
+            } else {
+                alert("The AnyDL folder appears after the first download.", "Storage")
+            }
+        }
+        if @setting == "Clear downloads" {
+            @clearWhat = ""
+            menu "Clear downloads ({@librarySummary})" {
+                item "Delete everything":
+                    @clearWhat = "all"
+                item "Delete downloads older than a week":
+                    @clearWhat = "old"
+                item "Cancel":
+                    nothing()
+            }
+            if @clearWhat {
+                aShellPut(scriptFile, true)
+                const clearText = "clear\n{@clearWhat}"
+                const clearFile = setName(clearText, "anydl_job.txt", true)
+                aShellPut(clearFile, true)
+                aShellRun("cd $SHORTCUTS\npython anydl.py", "open", false)
+                stop()
+            }
+        }
+    }
+
+    /* Save settings only when one changed. */
+    if @settingsChanged == true {
+        @settings = "quality={@quality}\nfps={@fps}\ncodec={@codec}\naudio={@audio}\nsubtitles={@subtitles}\nafter={@after}\nkeep={@keep}\nupdates={@updates}"
+        const newSettingsFile = setName(@settings, "anydl_settings.txt", true)
+        aShellPut(newSettingsFile, true)
     }
 }

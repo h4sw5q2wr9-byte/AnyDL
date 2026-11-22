@@ -16,7 +16,7 @@ Look, ready to save to Photos or Files.
 | <img src="icons/audio.png" width="32" alt=""> | **Download Audio** | Music, or just the sound of a video. |
 | <img src="icons/gallery.png" width="32" alt=""> | **Download Gallery** | Images, albums and photo posts through [gallery-dl](https://github.com/mikf/gallery-dl), or the images on the page. |
 | <img src="icons/file.png" width="32" alt=""> | **Download File** | Documents, archives and other files linked on a page. |
-| <img src="icons/tools.png" width="32" alt=""> | **Media tools** | Compress or trim a video, make a GIF, extract the audio, convert an image. |
+| <img src="icons/tools.png" width="32" alt=""> | **Media tools** | Video, photo and audio tools: compress, trim, change speed, rotate, GIF, remove background, convert and more. |
 | <img src="icons/library.png" width="32" alt=""> | **My downloads** | Your downloads sorted into folders, and recent downloads to get again. |
 | <img src="icons/settings.png" width="32" alt=""> | **Settings** | Quality, frame rate, subtitles, MP3, what happens after a download, storage. |
 
@@ -70,6 +70,10 @@ Start AnyDL in any of these ways:
 - Copy a link, then run AnyDL. It reads the clipboard.
 - Run AnyDL with nothing copied and paste the link when asked.
 
+With a link, AnyDL shows **Video, Audio, Images, File** and **More** (media
+tools, your downloads, settings). Without one, it shows **Download a link,
+Media tools, My downloads** and **Settings**. Every submenu has **Back**.
+
 Choose what to download. a-Shell opens, downloads, and shows the result in
 Quick Look right there; use the share button to save it to Photos, Files, or
 anywhere else. To skip the preview, set **After download** to
@@ -93,42 +97,50 @@ Everything AnyDL downloads is kept in the Files app under
 | Files | Documents, archives and everything else |
 | Playlists | One folder per playlist, channel or profile |
 
-**My downloads** in the menu opens these folders and lists your recent
-downloads, so you can download one again or open its original link. How
+**My downloads** in the menu has **Recent downloads** and **Browse folders**,
+which opens these folders in Files. Recent downloads lists your last 30, so you can download one again or open its original link. How
 long downloads are kept is up to you (Settings › Keep downloads), and
 Settings › Clear downloads frees the space at once.
 
 ### Media tools
 
 These use iOS's own video and image actions, so they are fast and need no
-a-Shell. Share a photo or video to AnyDL to start here, or pick one from
-Photos or Files.
+a-Shell. Share a photo, video or audio file to AnyDL to start in the right
+tools straight away, or pick one from Photos or Files. The Photos picker
+only shows what the tool can use, so a photo never ends up in a video tool.
 
-| Tool | What it does |
+| Tools | What they do |
 | --- | --- |
-| Compress video | Makes a video smaller: 540p, 720p, 1080p, or HEVC for the smallest file at the same sharpness. Shows the size before and after. |
-| Trim | Cuts a video or song shorter, with iOS's trim screen. |
-| Make a GIF | Turns a video into an animated GIF. |
-| Extract audio | Saves the sound of a video as M4A. |
-| Convert image | To JPEG, PNG or HEIF. |
+| Video tools | **Compress** (540p, 720p, 1080p, or HEVC for about half the size at the same resolution), **Trim**, **Change speed** (slow motion or double), **Rotate**, **Make a GIF**, **Extract audio** (M4A) |
+| Photo tools | **Compress** (1280 px, 2048 px or full size, as JPEG or HEIF; never enlarges), **Resize**, **Convert** (JPEG, PNG, HEIF), **Remove background**, **Remove location & info**, **Rotate or flip** |
+| Audio tools | **Trim**, **Convert** (M4A, AIFF), **Change speed**. Works on audio files, or on the sound of a video from Photos |
 
-Each result can be previewed, saved to Photos or Files, or shared.
+Slow steps show a notification while they work. Each result shows the size
+before and after, and can be previewed, saved to Photos or Files, shared, or
+edited further with another tool (**Edit more**).
+
+Compressing a video keeps the same quality setting iOS always uses, so the
+savings come from a lower resolution or from HEVC. Re-encoding a 1080p video
+at 1080p H.264 saves little.
 
 ### Settings
 
-Each row in **Settings** shows its current value.
+Settings is split into short menus. Each row shows its current value.
 
-| Setting | Options |
-| --- | --- |
-| Video quality | Best (default), 4K, 1440p, 1080p, 720p, 480p, 360p (Data saver), 240p, Ask each time |
-| Frame rate | Any (default), Up to 60 fps, Up to 30 fps |
-| Video format | Most compatible (default; H.264, plays everywhere), Highest quality (also VP9 and AV1) |
-| Audio format | Original (default), MP3 with cover image |
-| Subtitles | Off (default), or one of 15 languages, built into the video |
-| After download | Preview (default), Save to Photos, Keep in Files |
-| Keep downloads | Forever (default), 1 month, 1 week, 1 day |
-| Clear downloads | Delete everything, or downloads older than a week |
-| Updates | Check now, and automatic checks on or off |
+| Menu | Setting | Options |
+| --- | --- | --- |
+| Downloads | Video quality | Best (default), 4K, 1440p, 1080p, 720p, 480p, 360p (Data saver), 240p, Ask each time |
+| | Frame rate | Any (default), Up to 60 fps, Up to 30 fps |
+| | Video format | Most compatible (default; H.264, plays everywhere), Highest quality (also VP9 and AV1) |
+| | Audio format | Original (default), MP3 with cover image |
+| | Subtitles | Off (default), or one of 15 languages, built into the video |
+| After download | | Preview (default), Save to Photos, Keep in Files |
+| Storage | Keep downloads | Forever (default), 1 month, 1 week, 1 day |
+| | Clear downloads | Delete everything, or downloads older than a week |
+| | Open AnyDL folder | |
+| YouTube sign-in | | See [YouTube says I'm a bot](#youtube-says-im-a-bot) |
+| Updates | | Check now, and automatic checks on or off |
+| Help & about | | The welcome page and version |
 
 Quality means the short side of the picture, so an upright 720x1280 video
 is 720p. If a video has no such size, the closest smaller one is used, and

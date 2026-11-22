@@ -8,10 +8,17 @@ changes are included here.)
 
 **New**
 
-- **Media tools**: compress a video (540p, 720p, 1080p or HEVC, showing the
-  size before and after), trim, make a GIF, extract the audio, convert an
-  image. They use iOS's own actions. Share a photo or video to AnyDL to
-  start there.
+- **Short menus with submenus** and Back everywhere: with a link, Video,
+  Audio, Images, File and More; without one, Download a link, Media tools,
+  My downloads and Settings. No menu has more than seven rows.
+- **Media tools** in three groups, using iOS's own actions:
+  - Video: compress (540p, 720p, 1080p or HEVC), trim, change speed, rotate,
+    make a GIF, extract audio.
+  - Photo: compress (JPEG or HEIF, never enlarging), resize, convert, remove
+    background, remove location and camera info, rotate or flip.
+  - Audio: trim, convert (M4A or AIFF), change speed.
+  Share a file to AnyDL to open the right group. Results show the size
+  before and after and can be saved, shared or edited further.
 - **My downloads**: downloads are sorted into Videos, Audio, Photos, Files
   and Playlists in Files, with a list of recent downloads to download again
   or open the original link.
@@ -44,6 +51,13 @@ changes are included here.)
   for X videos from the FxTwitter fallback.
 - Leaving Settings returns to the main menu.
 - Subtitles that fail to download no longer stop the video.
+- Choosing a photo for a video tool caused "Encode Media failed … Photo
+  Media". Photos pickers now only show the right kind, and files are
+  checked by type first, with a clear message instead of an error.
+- Settings failed with "Numerical argument out of domain" when the AnyDL
+  folder information was written by an older version; it is now read
+  without assuming how many lines it has.
+- Slow media tools show a notification while they work.
 - Subtitles are marked as the default track and no longer added twice for
   YouTube ("en" and "en-orig").
 

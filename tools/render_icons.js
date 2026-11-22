@@ -24,6 +24,11 @@ const icons = [
   ['subtitles', 'captions', GREEN], ['after', 'download', TEAL], ['keep', 'clock', YELLOW],
   ['clear', 'trash-2', CRIMSON], ['updates', 'refresh-cw', SKY], ['help', 'circle-help', GRAY],
   ['signin', 'key-round', PINK],
+  // 3.0 submenus and tools
+  ['link', 'link', BLUE], ['more', 'layout-grid', GRAY], ['rotate', 'rotate-cw', INDIGO],
+  ['resize', 'scaling', TEAL], ['removebg', 'eraser', PINK], ['privacy', 'map-pin-off', GREEN],
+  ['flip', 'flip-horizontal-2', SKY], ['folders', 'folders', TEAL], ['storage', 'hard-drive', YELLOW],
+  ['downloads', 'sliders-horizontal', RED], ['photocompress', 'image-down', PURPLE],
 ];
 (async () => {
   const b = await chromium.launch();
