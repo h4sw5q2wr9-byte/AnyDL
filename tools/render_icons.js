@@ -23,6 +23,7 @@ const icons = [
   ['quality', 'monitor-play', RED], ['fps', 'gauge', ORANGE], ['codec', 'clapperboard', INDIGO],
   ['subtitles', 'captions', GREEN], ['after', 'download', TEAL], ['keep', 'clock', YELLOW],
   ['clear', 'trash-2', CRIMSON], ['updates', 'refresh-cw', SKY], ['help', 'circle-help', GRAY],
+  ['signin', 'key-round', PINK],
 ];
 (async () => {
   const b = await chromium.launch();

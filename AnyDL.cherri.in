@@ -354,7 +354,7 @@ repeat round for 30 {
         } else {
             const libraryLines = splitText("{@libraryText}", "\n")
             @libraryLink = getFirstItem(libraryLines)
-            @librarySummary = getLastItem(libraryLines)
+            @librarySummary = getListItem(libraryLines, 2)
             @libraryItems: array
             @libraryItems += "@@CARD(Recent downloads|Download again or open the original link|recent)@@"
             @libraryItems += "@@CARD(Open AnyDL folder|{@librarySummary}|library)@@"
@@ -415,10 +415,15 @@ repeat round for 30 {
     if @choiceName == "Settings" {
         const storageFile = aShellGet("anydl_library.txt", false, true)
         const storageLines = splitText("{storageFile}", "\n")
-        @storage = getLastItem(storageLines)
+        @storage = getListItem(storageLines, 2)
         if !@storage {
             @storage = "No downloads yet"
         }
+        @signIn = getListItem(storageLines, 3)
+        if !@signIn {
+            @signIn = "Not set up"
+        }
+        @folderLink = getFirstItem(storageLines)
         @settingsDone = false
         repeat i for 30 {
             if @settingsDone == false {
@@ -431,6 +436,7 @@ repeat round for 30 {
                 @settingItems += "@@CARD(After download|{@after}|after)@@"
                 @settingItems += "@@CARD(Keep downloads|{@keep}|keep)@@"
                 @settingItems += "@@CARD(Clear downloads|{@storage}|clear)@@"
+                @settingItems += "@@CARD(YouTube sign-in|{@signIn} · for the bot check|signin)@@"
                 @settingItems += "@@CARD(Updates|Automatic checks: {@updates} · Check now|updates)@@"
                 @settingItems += "@@CARD(Help & setup guide|How to set up and use AnyDL|help)@@"
                 @settingItems += "@@CARD(Back|Return to the main menu|back)@@"
@@ -516,6 +522,18 @@ repeat round for 30 {
                             @updates = "On"
                         item "Automatic checks: Off":
                             @updates = "Off"
+                    }
+                }
+                if @setting == "YouTube sign-in" {
+                    menu "If YouTube keeps saying it thinks you are a bot, AnyDL can sign in with a cookies.txt from a browser where you are signed in to YouTube. Put the file in Files › a-Shell › AnyDL. Use a second Google account: YouTube may limit accounts used by downloaders." {
+                        item "How to get cookies.txt":
+                            openURL("https://github.com/h4sw5q2wr9-byte/AnyDL#youtube-says-im-a-bot")
+                            stop()
+                        item "Open the AnyDL folder":
+                            openURL("{@folderLink}")
+                            stop()
+                        item "Back":
+                            nothing()
                     }
                 }
                 if @setting == "Help & setup guide" {

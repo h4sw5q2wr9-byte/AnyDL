@@ -137,6 +137,17 @@ UPDATE_EVERY_DAY = 24 * 3600
 LARGE_BYTES = 50 * 1024 * 1024
 VISIBLE_DIR = os.path.join(os.path.expanduser("~"), "Documents", "AnyDL")
 TYPE_FOLDERS = {"video": "Videos", "audio": "Audio", "image": "Photos", "file": "Files"}
+# A cookies.txt exported from a browser where you are signed in to YouTube
+# (Netscape format). Optional; see "YouTube says I'm a bot" in the README.
+COOKIES_FILE = os.path.join(VISIBLE_DIR, "cookies.txt")
+BOT_FIX_STAMP = os.path.join(BASE, "anydl_botfix.txt")
+
+# When YouTube answers "Sign in to confirm you're not a bot" for yt-dlp's
+# default player types (tv_samsung, visionos, web), these are tried next.
+# None of them needs a GVS PO token for its formats (web_safari and mweb
+# only for their HLS formats), which AnyDL cannot generate on iOS.
+YOUTUBE_FALLBACK_CLIENTS = [["tv", "web_safari"], ["web_embedded", "tv_downgraded"], ["mweb"]]
+BOT_CHECK = re.compile(r"confirm you.re not a bot|LOGIN_REQUIRED", re.I)
 PLAYLISTS_FOLDER = "Playlists"
 
 # Set once control has been handed back to Shortcuts or to the preview.
@@ -349,8 +360,10 @@ class Progress:
 
 
 FRIENDLY_ERRORS = [
-    (r"confirm you.re not a bot", "YouTube thinks this is a bot and wants a sign-in. Wait a while, or "
-                                  "switch between Wi-Fi and mobile data, then try again."),
+    (r"confirm you.re not a bot", "YouTube thinks this is a bot. AnyDL already tried other ways. "
+                                  "Wait a few minutes, switch between Wi-Fi and mobile data, "
+                                  "or turn off any VPN, then try again. If it keeps happening, set up "
+                                  "YouTube sign-in: Settings › YouTube sign-in."),
     (r"429|too many requests", "The site says there were too many requests. Wait a few minutes, "
                                "then try again."),
     (r"confirm your age|age.restricted|inappropriate for some users",
@@ -371,6 +384,11 @@ FRIENDLY_ERRORS = [
      r"nodename nor servname|Connection (refused|reset)", "Could not reach the site. Check your "
                                                           "internet connection and try again."),
 ]
+
+
+def first_sentence(text):
+    m = re.match(r"(.+?[.!?])(\s|$)", text or "")
+    return m.group(1) if m else text
 
 
 def friendly_error(text):
@@ -520,7 +538,7 @@ def migrate_library():
     keep = set(TYPE_FOLDERS.values()) | {PLAYLISTS_FOLDER}
     for name in os.listdir(VISIBLE_DIR):
         path = os.path.join(VISIBLE_DIR, name)
-        if name.startswith(".") or name in keep:
+        if name.startswith(".") or name in keep or name == "cookies.txt":
             continue
         try:
             if os.path.isfile(path):
@@ -540,7 +558,7 @@ def library_files(older_than_days=None):
     cutoff = time.time() - older_than_days * 86400 if older_than_days else None
     for root, _dirs, names in os.walk(VISIBLE_DIR):
         for name in names:
-            if name.startswith("."):
+            if name.startswith(".") or (root == VISIBLE_DIR and name == "cookies.txt"):
                 continue
             path = os.path.join(root, name)
             try:
@@ -598,8 +616,9 @@ def write_library_summary():
     os.makedirs(VISIBLE_DIR, exist_ok=True)
     for folder in list(TYPE_FOLDERS.values()) + [PLAYLISTS_FOLDER]:
         os.makedirs(os.path.join(VISIBLE_DIR, folder), exist_ok=True)
+    signed_in = "cookies.txt found" if os.path.exists(COOKIES_FILE) else "Not set up"
     with open(LIBRARY_FILE, "w", encoding="utf-8") as f:
-        f.write(files_link(VISIBLE_DIR) + "\n" + summary)
+        f.write(files_link(VISIBLE_DIR) + "\n" + summary + "\n" + signed_in)
 
 
 def clear_library(which):
@@ -1111,7 +1130,8 @@ def clean_error(text):
     text = re.split(r"\s+(?:This helps protect our community\.\s*)?Use --cookies|\s+See https://github\.com/yt-dlp", text)[0]
     text = re.sub(r"^\[[\w:.-]+\]\s*(?:[\w.-]+:\s+)?", "", text.strip())   # "[twitter] 123: "
     text = text.strip()
-    if re.search(r"NSFW|authenticat|log ?in|sign in|cookies|age.restricted|private", text, re.I):
+    if (re.search(r"NSFW|authenticat|log ?in|sign in|cookies|age.restricted|private", text, re.I)
+            and not BOT_CHECK.search(text)):
         text += " (This post needs a logged-in account, and AnyDL has no login.)"
     return text
 
@@ -1203,6 +1223,43 @@ def ytdlp_hooks(audio):
     return progress, step, before_download
 
 
+def is_youtube(url):
+    host = (urllib.parse.urlsplit(url).hostname or "").lower()
+    return host.endswith(("youtube.com", "youtu.be", "youtube-nocookie.com"))
+
+
+def cookie_file():
+    """The user's cookies.txt, if there is one that looks like the right kind."""
+    try:
+        with open(COOKIES_FILE, encoding="utf-8", errors="replace") as f:
+            head = f.read(4096)
+    except OSError:
+        return None
+    if "\t" in head or "Netscape HTTP Cookie File" in head:
+        return COOKIES_FILE
+    note("cookies.txt is not in the right format (Netscape cookies.txt), so it was not used.")
+    return None
+
+
+def refresh_ytdlp_after_bot_check():
+    """YouTube's bot checks change often and yt-dlp's fixes reach its newest
+    (pre-release) builds first, so update to those, at most every 6 hours."""
+    try:
+        with open(BOT_FIX_STAMP) as f:
+            if time.time() - float(f.read().strip() or 0) < 6 * 3600:
+                return False
+    except (OSError, ValueError):
+        pass
+    say("Updating yt-dlp to its newest build…")
+    ok = _pip(["--upgrade", "--pre", "yt-dlp"])
+    try:
+        with open(BOT_FIX_STAMP, "w") as f:
+            f.write(str(time.time()))
+    except OSError:
+        pass
+    return ok
+
+
 def try_ytdlp(url, folder, audio=False, referer=None, options=None, playlist=0):
     """Download with yt-dlp. playlist > 0 downloads that many playlist items."""
     options = options or OPTIONS
@@ -1226,6 +1283,11 @@ def try_ytdlp(url, folder, audio=False, referer=None, options=None, playlist=0):
         subtitles = False
     outtmpl = os.path.join(folder, NAME_TEMPLATE)
     error = None
+    cookies = cookie_file()
+    if cookies:
+        note("Signed in with your cookies.txt.")
+    fallbacks = [list(c) for c in YOUTUBE_FALLBACK_CLIENTS] if is_youtube(url) else []
+    clients = None
     attempts = [(fmt, merge, cover) for fmt, merge in formats for cover in ((True, False) if mp3 else (False,))]
 
     i = 0
@@ -1244,6 +1306,10 @@ def try_ytdlp(url, folder, audio=False, referer=None, options=None, playlist=0):
                          "%s(-(?!orig).*)?" % language, "--embed-subs"]
             if referer:
                 args += ["--referer", referer]
+            if cookies:
+                args += ["--cookies", cookies]
+            if clients:
+                args += ["--extractor-args", "youtube:player_client=%s" % ",".join(clients)]
             py = sys.executable or "python3"
             if not _run_tool(["yt-dlp", [py, "-m", "yt_dlp"]], args + [url]):
                 error = "yt-dlp could not download this link."
@@ -1285,6 +1351,10 @@ def try_ytdlp(url, folder, audio=False, referer=None, options=None, playlist=0):
                     {"key": "FFmpegEmbedSubtitle", "already_have_subtitle": False})
             if referer:
                 opts["http_headers"] = {"Referer": referer}
+            if cookies:
+                opts["cookiefile"] = cookies
+            if clients:
+                opts["extractor_args"] = {"youtube": {"player_client": clients}}
             try:
                 stop_solver_navigation()
                 with yt_dlp.YoutubeDL(opts) as ydl:
@@ -1306,6 +1376,15 @@ def try_ytdlp(url, folder, audio=False, referer=None, options=None, playlist=0):
                                  if "youtube" in (info.get("extractor") or "").lower() else ""))
             except Exception as e:
                 error = clean_error(e)
+                if BOT_CHECK.search(error) and fallbacks:
+                    # Another kind of YouTube player often gets through.
+                    clients = fallbacks.pop(0)
+                    say("YouTube bot check: trying %d of %d…" % (
+                        len(YOUTUBE_FALLBACK_CLIENTS) - len(fallbacks), len(YOUTUBE_FALLBACK_CLIENTS)))
+                    continue
+                if BOT_CHECK.search(error):
+                    refresh_ytdlp_after_bot_check()
+                    break
                 if subtitles and "subtitle" in error.lower():
                     # Subtitles are a bonus; never let them stop the download.
                     say("The subtitles failed; downloading without them.")
@@ -1368,6 +1447,8 @@ def playlist_info(url):
         raise Failed("Playlists need yt-dlp to load in Python.")
     opts = {"extract_flat": "in_playlist", "quiet": True, "no_warnings": True,
             "playlistend": PLAYLIST_LIMIT + 1}
+    if cookie_file():
+        opts["cookiefile"] = COOKIES_FILE
     try:
         stop_solver_navigation()
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -1841,14 +1922,14 @@ def run(mode, url, options=None):
             return try_ytdlp(url, new_folder("ytdlp"), audio=(mode == "audio"), options=options)
         except Failed as e:
             tool_error = str(e)
-            wrap(friendly_error(str(e)))
+            wrap(first_sentence(friendly_error(str(e))))
     elif mode == "gallery":
         say("Looking up the images…")
         try:
             return try_gallerydl(url, new_folder("gallery"))
         except Failed as e:
             tool_error = str(e)
-            wrap(friendly_error(str(e)))
+            wrap(first_sentence(friendly_error(str(e))))
 
     if mode in ("video", "gallery") and x_status_id(url):
         say("Trying another way (FxTwitter)…")
@@ -1856,17 +1937,19 @@ def run(mode, url, options=None):
             kinds = ("video",) if mode == "video" else ("image",)
             return try_fxtwitter(url, new_folder("fxtwitter"), kinds, options.get("quality"))
         except Failed as e:
-            wrap(friendly_error(str(e)))
+            wrap(first_sentence(friendly_error(str(e))))
             # Show FxTwitter's reason only when it is definite; otherwise
             # the downloader's own error says more.
             if isinstance(e, FxAnswer) or not tool_error:
                 tool_error = str(e)
 
+    if tool_error and is_youtube(url):
+        raise Failed(tool_error)        # a YouTube page has nothing else to find
     say("Looking through the page…")
     try:
         return scan_page(page_url, page, mode)
     except Failed as e:
-        wrap(friendly_error(str(e)))
+        wrap(first_sentence(friendly_error(str(e))))
         if tool_error and "Unsupported URL" not in tool_error:
             raise Failed(tool_error)
         if page is None and probe_error:

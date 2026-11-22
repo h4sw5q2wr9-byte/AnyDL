@@ -33,6 +33,10 @@ changes are included here.)
   age-restricted, unavailable or blocked videos, too many requests, no
   connection, no storage), with the technical detail underneath.
 - Streaming sites download four pieces at a time.
+- **YouTube bot check**: when YouTube answers "Sign in to confirm you're not
+  a bot", AnyDL tries three other kinds of YouTube player, then updates
+  yt-dlp to its newest build. Optional **YouTube sign-in** with a
+  cookies.txt in the AnyDL folder, with a row in Settings and a guide.
 
 **Fixed**
 

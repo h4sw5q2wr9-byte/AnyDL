@@ -201,6 +201,33 @@ files.
 | The AnyDL folder takes too much space | Settings › Clear downloads, or set Keep downloads to a shorter time. |
 | A compressed video is not smaller | It was already small or already compressed. Try a smaller size, or HEVC. |
 
+### YouTube says I'm a bot
+
+Sometimes YouTube answers "Sign in to confirm you're not a bot". It decides
+this mostly from the network you are on, so it is not about you. AnyDL
+already tries three other kinds of YouTube player when this happens, and
+updates its download tools to the newest version. If it still fails:
+
+1. **Wait a few minutes** and try again.
+2. **Switch networks**: from Wi-Fi to mobile data or the other way round.
+3. **Turn off any VPN.**
+4. **Sign in with a cookies.txt** if it keeps happening. AnyDL then downloads
+   as a signed-in YouTube user, which the bot check almost always lets
+   through:
+   1. On a computer, open a **private (incognito) window** and sign in to
+      YouTube. Use a **second Google account**: YouTube may limit accounts it
+      sees downloading.
+   2. Export the YouTube cookies as **cookies.txt** with a browser extension
+      such as *Get cookies.txt LOCALLY* (Chrome) or *cookies.txt* (Firefox),
+      then close the private window without signing out.
+   3. Copy the file to your iPhone (AirDrop or iCloud Drive) and put it in
+      **Files › On My iPhone › a-Shell › AnyDL**, named `cookies.txt`.
+
+   Settings › YouTube sign-in then shows "cookies.txt found", and each
+   download's summary says "Signed in with your cookies.txt". Cookies stay on
+   your iPhone; delete the file to stop. They expire after a while, so if
+   the bot check comes back, export them again.
+
 ## Privacy
 
 AnyDL runs entirely on your device. It has no server, no analytics and no
@@ -212,6 +239,9 @@ account. It contacts:
   release is out (switch the daily check off in Settings);
 - FxTwitter's public API (`api.fxtwitter.com`), only when X will not hand
   over a post's media; it receives that post's id.
+
+If you add a `cookies.txt` for YouTube sign-in, it is only read by yt-dlp on
+your iPhone and sent to the sites it belongs to, like a browser would.
 
 ## Build from source
 
