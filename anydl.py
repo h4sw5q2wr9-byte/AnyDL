@@ -5,24 +5,31 @@ Runs inside a-Shell on iOS, started by the AnyDL shortcut. The shortcut writes
 anydl_job.txt, runs this script, and reads the result back:
 
     anydl_job.txt      line 1: mode (video | audio | gallery | file | pick |
-                       playlist), then the link, or for "pick" the chosen list
-                       entries, or for "playlist" the chosen amount. Lines of
-                       the form key=value are settings (see read_job).
+                       playlist | again | clear), then the link, or for "pick"
+                       the chosen list entries, for "playlist" the amount, for
+                       "again" the history number, for "clear" all or old.
+                       Lines of the form key=value are settings (read_job).
     anydl_settings.txt the shortcut's saved settings, as key=value lines
-    anydl_status.txt   "OK", "PICK", "PLAYLIST", "SAVED", "VIEW", or a
-                       one-line error message
-    anydl_message.txt  when PLAYLIST or SAVED: the text for the shortcut to show
+    anydl_status.txt   "OK", "PICK", "PLAYLIST", "SAVED", "PHOTOS",
+                       "CLEARED", "VIEW", "FILES", or a one-line error
+    anydl_message.txt  when PLAYLIST, SAVED or CLEARED: text to show
     anydl_open.txt     when SAVED: a link that opens the folder in Files
     anydl_number.txt   when PLAYLIST: the question for typing an amount
     anydl_update.txt   a newer AnyDL version, once (see check_for_update)
-    anydl_files.txt    when OK: one downloaded file name per line
+    anydl_files.txt    when OK or PHOTOS: one file name per line, in this
+                       folder, for the shortcut to fetch
     anydl_choices.txt  when PICK or PLAYLIST: one entry per line to choose from
-    anydl_large.txt    when VIEW: full paths of the files saved for the preview
+    anydl_library.txt  a link to the AnyDL folder in Files, then a summary
+    anydl_history.txt  recent downloads, newest first, one per line, with
+    anydl_history_links.txt  their links in the same order
 
 The shortcut does not wait for this script. When there is something for it
-to show (status PICK, OK or an error), the script starts AnyDL again with
-"anydl-return" as input (see back_to_shortcuts). For "VIEW" it shows the
-download in a-Shell's own preview instead (see show_in_ashell).
+to show, the script starts AnyDL again with "anydl-return" as input (see
+back_to_shortcuts). For "VIEW" it shows the download in a-Shell's own
+preview instead (see show_in_ashell); for "FILES" it opens the Files app.
+
+Downloads are kept in On My iPhone > a-Shell > AnyDL, sorted into Videos,
+Audio, Photos, Files and Playlists (see the library section).
 
 What each mode tries, after first checking whether the link itself is a file:
     video    yt-dlp, then for X posts FxTwitter, then video found on the page
@@ -47,7 +54,7 @@ import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
 
-VERSION = "2.8"
+VERSION = "3.0"
 
 BASE = os.environ.get("ANYDL_DIR") or os.environ.get("SHORTCUTS") or os.getcwd()
 TMP = os.path.join(BASE, "anydl_tmp")
@@ -65,6 +72,11 @@ NUMBER_FILE = os.path.join(BASE, "anydl_number.txt")
 UPDATE_FILE = os.path.join(BASE, "anydl_update.txt")
 UPDATE_STATE_FILE = os.path.join(BASE, "anydl_update_state.json")
 STAMP_FILE = os.path.join(BASE, "anydl_stamp.txt")
+LIBRARY_FILE = os.path.join(BASE, "anydl_library.txt")
+HISTORY_FILE = os.path.join(BASE, "anydl_history.json")
+HISTORY_LIST_FILE = os.path.join(BASE, "anydl_history.txt")
+HISTORY_LINKS_FILE = os.path.join(BASE, "anydl_history_links.txt")
+HISTORY_LIMIT = 30
 
 # Used only for plain page and file requests. The downloaders keep their own
 # identity: forcing one on yt-dlp breaks sites such as TikTok.
@@ -76,9 +88,37 @@ PLAYLIST_LIMIT = 100    # most videos one playlist download takes
 MENU_LIMIT = 60
 MODES = ("video", "audio", "gallery", "file")
 
-# Settings, as the shortcut saves them (human-readable values).
-DEFAULT_OPTIONS = {"quality": "best", "audio": "original", "updates": "on"}
-QUALITY_HEIGHTS = {"1080p": 1080, "720p": 720, "480p": 480, "data saver": 360}
+# Settings, as the shortcut saves them (human-readable values; see the
+# Settings part of AnyDL.cherri.in for the choices).
+DEFAULT_OPTIONS = {"quality": "Best", "fps": "Any", "codec": "Most compatible",
+                   "audio": "Original", "subtitles": "Off", "after": "Preview",
+                   "keep": "Forever", "updates": "On"}
+OPTIONS = dict(DEFAULT_OPTIONS)     # this run's settings, set by main()
+JOB = {}                            # this run's link and mode, for the history
+
+SUBTITLE_LANGUAGES = {
+    "english": "en", "dutch": "nl", "german": "de", "french": "fr", "spanish": "es",
+    "portuguese": "pt", "italian": "it", "polish": "pl", "turkish": "tr",
+    "arabic": "ar", "hindi": "hi", "indonesian": "id", "japanese": "ja",
+    "korean": "ko", "chinese": "zh",
+}
+KEEP_DAYS = {"1 day": 1, "1 week": 7, "1 month": 30}
+
+
+def quality_height(quality):
+    """The short side a quality setting allows, or None for Best."""
+    q = (quality or "").lower()
+    if "4k" in q:
+        return 2160
+    if "data saver" in q:
+        return 360
+    m = re.search(r"(\d{3,4})p", q)
+    return int(m.group(1)) if m else None
+
+
+def fps_limit(setting):
+    m = re.search(r"(\d+)\s*fps", (setting or "").lower())
+    return int(m.group(1)) if m else None
 
 RELEASES_API = "https://api.github.com/repos/h4sw5q2wr9-byte/AnyDL/releases/latest"
 UPDATE_EVERY_DAY = 24 * 3600
@@ -94,6 +134,8 @@ UPDATE_EVERY_DAY = 24 * 3600
 # them are in the Files folder.
 LARGE_BYTES = 50 * 1024 * 1024
 VISIBLE_DIR = os.path.join(os.path.expanduser("~"), "Documents", "AnyDL")
+TYPE_FOLDERS = {"video": "Videos", "audio": "Audio", "image": "Photos", "file": "Files"}
+PLAYLISTS_FOLDER = "Playlists"
 
 # Set once control has been handed back to Shortcuts or to the preview.
 _handed_off = False
@@ -172,78 +214,287 @@ def write_status(text):
 
 
 def finish(files=None, error=None):
-    """Write the result files the shortcut reads, then exit."""
+    """Put the downloads in the library, show or hand them over, then exit.
+
+    What happens depends on the After download setting: a preview (in
+    a-Shell for one file or a large one, in Shortcuts for several small
+    files), saving to Photos (done by the shortcut, so only for photos and
+    videos small enough to hand over), or only keeping them in Files.
+    """
     shutil.rmtree(TMP, ignore_errors=True)
-    if files and (len(files) == 1 or any(os.path.getsize(p) > LARGE_BYTES for p in files)):
-        shown = move_visible(files)
-        with open(LARGE_FILE, "w", encoding="utf-8") as f:
-            f.write("\n".join(shown))
-        write_status("VIEW")
-        say("\nDone: %d file%s, saved in Files > On My iPhone > a-Shell > AnyDL."
-            % (len(shown), "" if len(shown) == 1 else "s"))
-        say("If you still see an earlier download, tap Done on it: a-Shell shows")
-        say("one preview at a time. This one is in the AnyDL folder in Files.")
-        biggest = max(shown, key=os.path.getsize)
-        show_in_ashell(biggest)
-        sys.exit(0)
-    if files:
-        with open(LIST_FILE, "w", encoding="utf-8") as f:
-            f.write("\n".join(os.path.basename(p) for p in files))
-        status = "OK"
-        say("\nDone: %d file%s." % (len(files), "" if len(files) == 1 else "s"))
-    else:
+    if not files:
         status = re.sub(r"\s+", " ", error or "Nothing was downloaded.").strip()[:400]
         say("\nFailed: " + status)
-    write_status(status)
+        write_status(status)
+        write_library_summary()
+        back_to_shortcuts()
+        sys.exit(0)
+
+    after = (OPTIONS.get("after") or "").lower()
+    large = any(os.path.getsize(p) > LARGE_BYTES for p in files)
+    media_only = all(kind_of(p) in ("video", "image") for p in files)
+    plural = "" if len(files) == 1 else "s"
+
+    if after.startswith("save to photos"):
+        if media_only and not large:
+            saved = [to_library(p, keep_original=True) for p in files]
+            write_list(files)
+            write_status("PHOTOS")
+            finish_run(saved, "\nDone: %d file%s. Saving to Photos..." % (len(files), plural))
+            back_to_shortcuts()
+            sys.exit(0)
+        say("\nThis download cannot go to Photos automatically (%s), so it opens here;"
+            % ("too large" if large else "not a photo or video"))
+        say("use the share button to save it.")
+
+    if after.startswith("keep in files"):
+        saved = [to_library(p) for p in files]
+        write_status("FILES")
+        folder = os.path.dirname(saved[0])
+        finish_run(saved, "\nDone: %d file%s, saved in Files > On My iPhone > a-Shell > AnyDL > %s."
+                   % (len(saved), plural, os.path.relpath(folder, VISIBLE_DIR)))
+        global _handed_off
+        _handed_off = True
+        a_shell("open " + files_link(folder))
+        sys.exit(0)
+
+    if len(files) == 1 or large:
+        shown = [to_library(p) for p in files]
+        write_status("VIEW")
+        finish_run(shown, "\nDone: %d file%s, saved in Files > On My iPhone > a-Shell > AnyDL."
+                   % (len(shown), plural))
+        say("If you still see an earlier download, tap Done on it: a-Shell shows")
+        say("one preview at a time. This one is in the AnyDL folder in Files.")
+        show_in_ashell(max(shown, key=os.path.getsize))
+        sys.exit(0)
+
+    saved = [to_library(p, keep_original=True) for p in files]
+    write_list(files)
+    write_status("OK")
+    finish_run(saved, "\nDone: %d files." % len(files))
     back_to_shortcuts()
     sys.exit(0)
 
 
-def move_visible(files):
-    """Move a run's files into the folder the Files app shows."""
-    os.makedirs(VISIBLE_DIR, exist_ok=True)
-    out = []
-    for src in files:
-        name = os.path.basename(src)
-        stem, ext = os.path.splitext(name)
-        dest = os.path.join(VISIBLE_DIR, name)
-        n = 2
-        while os.path.exists(dest):
-            dest = os.path.join(VISIBLE_DIR, "%s (%d)%s" % (stem, n, ext))
-            n += 1
+def write_list(files):
+    with open(LIST_FILE, "w", encoding="utf-8") as f:
+        f.write("\n".join(os.path.basename(p) for p in files))
+
+
+def finish_run(saved, message):
+    say(message)
+    title = os.path.splitext(os.path.basename(saved[0]))[0]
+    title = re.sub(r" \(\d+\)$", "", title)       # copy number, not part of the name
+    if len(saved) > 1:
+        title += " and %d more" % (len(saved) - 1)
+    record_history(title, len(saved), os.path.dirname(saved[0]))
+    write_library_summary()
+
+
+# ---------------------------------------------------------------- library
+
+def kind_of(path):
+    ext = ext_of(path)
+    if ext in VIDEO_EXT:
+        return "video"
+    if ext in AUDIO_EXT:
+        return "audio"
+    if ext in IMAGE_EXT:
+        return "image"
+    return "file"
+
+
+def unique_path(folder, name):
+    stem, ext = os.path.splitext(name)
+    dest = os.path.join(folder, name)
+    n = 2
+    while os.path.exists(dest):
+        dest = os.path.join(folder, "%s (%d)%s" % (stem, n, ext))
+        n += 1
+    return dest
+
+
+def to_library(src, keep_original=False):
+    """Move (or copy) a download into its type folder in the library."""
+    folder = os.path.join(VISIBLE_DIR, TYPE_FOLDERS[kind_of(src)])
+    os.makedirs(folder, exist_ok=True)
+    dest = unique_path(folder, os.path.basename(src))
+    if keep_original:
+        shutil.copy2(src, dest)
+    else:
         shutil.move(src, dest)
-        out.append(dest)
-    return out
+    os.utime(dest)      # "Keep downloads" counts from the download, not the upload
+    return dest
+
+
+def files_link(path):
+    """A link that opens a folder in the Files app."""
+    return "shareddocuments://" + urllib.parse.quote(os.path.realpath(path))
+
+
+def migrate_library():
+    """Sort downloads from before 3.0, which sat loose in the AnyDL folder."""
+    if not os.path.isdir(VISIBLE_DIR):
+        return
+    keep = set(TYPE_FOLDERS.values()) | {PLAYLISTS_FOLDER}
+    for name in os.listdir(VISIBLE_DIR):
+        path = os.path.join(VISIBLE_DIR, name)
+        if name.startswith(".") or name in keep:
+            continue
+        try:
+            if os.path.isfile(path):
+                folder = os.path.join(VISIBLE_DIR, TYPE_FOLDERS[kind_of(path)])
+            else:
+                folder = os.path.join(VISIBLE_DIR, PLAYLISTS_FOLDER)   # 2.8 playlists
+            os.makedirs(folder, exist_ok=True)
+            shutil.move(path, unique_path(folder, name))
+        except OSError:
+            pass
+
+
+def library_files(older_than_days=None):
+    found = []
+    if not os.path.isdir(VISIBLE_DIR):
+        return found
+    cutoff = time.time() - older_than_days * 86400 if older_than_days else None
+    for root, _dirs, names in os.walk(VISIBLE_DIR):
+        for name in names:
+            if name.startswith("."):
+                continue
+            path = os.path.join(root, name)
+            try:
+                if cutoff is None or os.path.getmtime(path) < cutoff:
+                    found.append(path)
+            except OSError:
+                pass
+    return found
+
+
+def delete_files(paths):
+    """Delete files and any playlist folders left empty. Returns (count, bytes)."""
+    count = size = 0
+    for path in paths:
+        try:
+            size += os.path.getsize(path)
+            os.remove(path)
+            count += 1
+        except OSError:
+            pass
+    playlists = os.path.join(VISIBLE_DIR, PLAYLISTS_FOLDER)
+    if os.path.isdir(playlists):
+        for name in os.listdir(playlists):
+            folder = os.path.join(playlists, name)
+            if os.path.isdir(folder) and not os.listdir(folder):
+                try:
+                    os.rmdir(folder)
+                except OSError:
+                    pass
+    return count, size
+
+
+def prune_library():
+    """Delete downloads older than the Keep downloads setting allows."""
+    days = KEEP_DAYS.get((OPTIONS.get("keep") or "").lower())
+    if days:
+        count, size = delete_files(library_files(older_than_days=days))
+        if count:
+            say("Removed %d download%s older than %s (%s)." % (
+                count, "" if count == 1 else "s", OPTIONS.get("keep"), human_size(size)))
+
+
+def human_size(size):
+    for unit in ("bytes", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return ("%d %s" % (size, unit)) if unit == "bytes" else ("%.1f %s" % (size, unit))
+        size /= 1024.0
+
+
+def write_library_summary():
+    files = library_files()
+    size = sum(os.path.getsize(p) for p in files if os.path.exists(p))
+    summary = ("%d file%s · %s" % (len(files), "" if len(files) == 1 else "s", human_size(size))
+               if files else "No downloads yet")
+    os.makedirs(VISIBLE_DIR, exist_ok=True)
+    for folder in list(TYPE_FOLDERS.values()) + [PLAYLISTS_FOLDER]:
+        os.makedirs(os.path.join(VISIBLE_DIR, folder), exist_ok=True)
+    with open(LIBRARY_FILE, "w", encoding="utf-8") as f:
+        f.write(files_link(VISIBLE_DIR) + "\n" + summary)
+
+
+def clear_library(which):
+    old = "old" in which.lower()
+    count, size = delete_files(library_files(older_than_days=7 if old else None))
+    what = "older than a week" if old else ""
+    message = ("Deleted %d download%s %s(%s)." % (count, "" if count == 1 else "s",
+                                                   what + " " if what else "", human_size(size))
+               if count else "There was nothing to delete.")
+    with open(MESSAGE_FILE, "w", encoding="utf-8") as f:
+        f.write(message)
+    say(message)
+
+
+# ---------------------------------------------------------------- history
+
+def load_history():
+    try:
+        with open(HISTORY_FILE, encoding="utf-8") as f:
+            entries = json.load(f)
+        return entries if isinstance(entries, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def record_history(title, count, folder):
+    if not JOB.get("url"):
+        return
+    entries = load_history()
+    entries.insert(0, {"title": title, "url": JOB["url"], "mode": JOB.get("mode", "video"),
+                       "count": count, "when": time.time(), "folder": folder})
+    entries = entries[:HISTORY_LIMIT]
+    try:
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(entries, f)
+    except OSError:
+        return
+    write_history_lists(entries)
+
+
+def write_history_lists(entries):
+    labels = []
+    for n, e in enumerate(entries, 1):
+        when = time.strftime("%d %b", time.localtime(e.get("when", 0))).lstrip("0")
+        labels.append("%d. %s · %s · %s" % (n, (e.get("title") or "Download")[:60],
+                                            (e.get("mode") or "video").capitalize(), when))
+    with open(HISTORY_LIST_FILE, "w", encoding="utf-8") as f:
+        f.write("\n".join(labels))
+    with open(HISTORY_LINKS_FILE, "w", encoding="utf-8") as f:
+        f.write("\n".join(e.get("url", "") for e in entries))
+
+
+def history_entry(lines):
+    m = re.search(r"(\d+)", " ".join(lines))
+    entries = load_history()
+    if not m or not 1 <= int(m.group(1)) <= len(entries):
+        raise Failed("That download is no longer in the history.")
+    return entries[int(m.group(1)) - 1]
 
 
 def cleanup_previous(keep_candidates=False):
-    """Delete old downloads so storage does not pile up.
-
-    Files shown in a-Shell's preview are kept for one more run: a-Shell shows
-    one preview at a time, so the previous one may still be open, and its
-    file must not disappear under it.
-    """
-    for listing in (LIST_FILE, PREVIOUS_FILE):
-        if not os.path.exists(listing):
-            continue
+    """Delete the copies left in this folder for the shortcut to fetch, and
+    the previous run's status files. Downloads in the library stay; the
+    Keep downloads setting decides how long (see prune_library)."""
+    if os.path.exists(LIST_FILE):
         try:
-            with open(listing, encoding="utf-8") as f:
+            with open(LIST_FILE, encoding="utf-8") as f:
                 for line in f.read().splitlines():
                     name = os.path.basename(line.strip())
-                    if not name or name.startswith("anydl"):
-                        continue
-                    folder = VISIBLE_DIR if listing == PREVIOUS_FILE else BASE
-                    path = os.path.join(folder, name)
-                    if os.path.isfile(path):
+                    path = os.path.join(BASE, name)
+                    if name and not name.startswith("anydl") and os.path.isfile(path):
                         os.remove(path)
         except OSError:
             pass
-    if os.path.exists(LARGE_FILE):
-        try:
-            os.replace(LARGE_FILE, PREVIOUS_FILE)
-        except OSError:
-            pass
-    leftovers = [LIST_FILE, CHOICES_FILE, MESSAGE_FILE, OPEN_FILE, NUMBER_FILE]
+    leftovers = [LIST_FILE, LARGE_FILE, PREVIOUS_FILE, CHOICES_FILE, MESSAGE_FILE,
+                 OPEN_FILE, NUMBER_FILE]
     if not keep_candidates:
         leftovers += [CANDIDATES_FILE, PLAYLIST_FILE]
     for path in leftovers:
@@ -514,26 +765,41 @@ VIDEO_FORMATS = [
 ]
 
 
-def video_formats(quality):
-    """VIDEO_FORMATS, limited to a resolution for the quality setting.
+def video_formats(quality, fps=None, codec=None):
+    """yt-dlp format choices for the Video quality, Frame rate and Video
+    format settings, best first, as [(format, merge into)].
 
-    "720p" means the short side of the picture, so an upright video (TikTok,
+    Quality means the short side of the picture, so an upright video (TikTok,
     Shorts) of 720x1280 counts as 720p. yt-dlp's filters cannot take the
     smaller of two fields, so wide and upright formats get their own filter.
-    If nothing is small enough, the smallest available is taken ("w").
+    "Most compatible" prefers H.264 (avc1), which plays everywhere, including
+    Photos; YouTube only offers it up to 1080p. "Highest quality" takes any
+    codec (VP9, AV1). When nothing meets the limits: without a frame-rate
+    match the frame rate is let go; without a size match the smallest
+    available is taken.
     """
-    limit = QUALITY_HEIGHTS.get((quality or "").lower())
-    if not limit:
+    limit = quality_height(quality)
+    cap = fps_limit(fps)
+    any_codec = "highest" in (codec or "").lower()
+    if not limit and not cap and not any_codec:
         return VIDEO_FORMATS
-    sides = ("[aspect_ratio>=?1][height<=?%d]" % limit,   # wide, or size unknown
-             "[aspect_ratio<1][width<=?%d]" % limit)      # upright
+    sides = (("[aspect_ratio>=?1][height<=?%d]" % limit,     # wide, or size unknown
+              "[aspect_ratio<1][width<=?%d]" % limit)        # upright
+             if limit else ("",))
 
-    def alternatives(*pieces):
-        return "/".join(piece.format(side) for piece in pieces for side in sides)
+    def alternatives(pieces, rate):
+        return "/".join(piece.format(side + rate) for piece in pieces for side in sides)
 
-    merged = alternatives("bv*{0}[vcodec^=avc1]+ba[ext=m4a]", "b{0}[ext=mp4]", "bv*{0}+ba", "b{0}")
-    single = alternatives("b{0}[ext=mp4]", "b{0}")
-    return [(merged + "/w", "mp4"), (single + "/w", None)]
+    if any_codec:
+        merged_pieces = ("bv*{0}+ba[ext=m4a]", "bv*{0}+ba", "b{0}")
+    else:
+        merged_pieces = ("bv*{0}[vcodec^=avc1]+ba[ext=m4a]", "b{0}[ext=mp4]", "bv*{0}+ba", "b{0}")
+    single_pieces = ("b{0}[ext=mp4]", "b{0}")
+    rates = (["[fps<=?%d]" % cap] if cap else []) + [""]
+    tail = "/w" if limit else "/b"
+    merged = "/".join(alternatives(merged_pieces, r) for r in rates) + tail
+    single = "/".join(alternatives(single_pieces, r) for r in rates) + tail
+    return [(merged, "mp4"), (single, None)]
 
 
 def have_ffmpeg():
@@ -679,26 +945,37 @@ def looks_unmerged(files):
     return any(re.search(r"\.f[\w-]+\.\w+$", os.path.basename(p)) for p in files)
 
 
+SUBTITLE_EXT = {"vtt", "srt", "ass", "ttml", "srv1", "srv2", "srv3", "json3", "lrc"}
+
+
 def try_ytdlp(url, folder, audio=False, referer=None, options=None, playlist=0):
     """Download with yt-dlp. playlist > 0 downloads that many playlist items."""
-    options = options or DEFAULT_OPTIONS
+    options = options or OPTIONS
     yt_dlp = ensure("yt_dlp", "yt-dlp", extras=("yt-dlp-ejs", "yt-dlp-apple-webkit-jsi"))
-    formats = AUDIO_FORMATS if audio else video_formats(options.get("quality"))
+    formats = (AUDIO_FORMATS if audio else
+               video_formats(options.get("quality"), options.get("fps"), options.get("codec")))
     ffmpeg = yt_dlp is not None and have_ffmpeg()
     if yt_dlp is not None and not ffmpeg and not audio:
         # Without ffmpeg, separate video and sound streams cannot be joined,
         # which limits some sites (YouTube above 360p) to lower quality.
         formats = [f for f in formats if not f[1]] or formats
         say("Note: ffmpeg is not available, so some videos come in lower quality.")
-    mp3 = audio and options.get("audio", "").lower() == "mp3"
+    mp3 = audio and (options.get("audio") or "").lower() == "mp3"
     if mp3 and not ffmpeg:
         say("Note: ffmpeg is not available, so audio keeps its original format.")
         mp3 = False
+    language = SUBTITLE_LANGUAGES.get((options.get("subtitles") or "").lower())
+    subtitles = bool(language) and not audio
+    if subtitles and not ffmpeg:
+        say("Note: ffmpeg is not available, so subtitles cannot be added.")
+        subtitles = False
     outtmpl = os.path.join(folder, NAME_TEMPLATE)
     error = None
     attempts = [(fmt, merge, cover) for fmt, merge in formats for cover in ((True, False) if mp3 else (False,))]
 
-    for fmt, merge, cover in attempts:
+    i = 0
+    while i < len(attempts):
+        fmt, merge, cover = attempts[i]
         empty(folder)
         if yt_dlp is None:
             args = ["-f", fmt, "-o", outtmpl, "--no-warnings", "--windows-filenames"]
@@ -706,6 +983,9 @@ def try_ytdlp(url, folder, audio=False, referer=None, options=None, playlist=0):
                      if playlist else ["--no-playlist"])
             if merge:
                 args += ["--merge-output-format", merge]
+            if subtitles:
+                args += ["--write-subs", "--write-auto-subs", "--sub-langs",
+                         "%s,%s-.*" % (language, language), "--embed-subs"]
             if referer:
                 args += ["--referer", referer]
             py = sys.executable or "python3"
@@ -720,6 +1000,7 @@ def try_ytdlp(url, folder, audio=False, referer=None, options=None, playlist=0):
                 "retries": 3,
                 "fragment_retries": 5,
                 "windowsfilenames": True,
+                "postprocessors": [],
             }
             if playlist:
                 opts["playlistend"] = playlist
@@ -727,8 +1008,13 @@ def try_ytdlp(url, folder, audio=False, referer=None, options=None, playlist=0):
             if merge:
                 opts["merge_output_format"] = merge
             if mp3:
-                opts["postprocessors"] = mp3_postprocessors(cover)
+                opts["postprocessors"] += mp3_postprocessors(cover)
                 opts["writethumbnail"] = cover
+            if subtitles:
+                opts.update(writesubtitles=True, writeautomaticsub=True,
+                            subtitleslangs=[language, language + "-.*"])
+                opts["postprocessors"].append(
+                    {"key": "FFmpegEmbedSubtitle", "already_have_subtitle": False})
             if referer:
                 opts["http_headers"] = {"Referer": referer}
             try:
@@ -736,24 +1022,37 @@ def try_ytdlp(url, folder, audio=False, referer=None, options=None, playlist=0):
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     info = ydl.extract_info(url) or {}
                 if not audio and not playlist and info.get("width") and info.get("height"):
-                    say("Quality: %dp (%sx%s)" % (min(info["width"], info["height"]),
-                                                  info["width"], info["height"]))
+                    fps = (" %d fps" % round(info["fps"])) if info.get("fps") else ""
+                    say("Quality: %dp%s (%sx%s, %s)" % (
+                        min(info["width"], info["height"]), fps, info["width"], info["height"],
+                        (info.get("vcodec") or "?").split(".")[0]))
+                if subtitles and not info.get("requested_subtitles") and not playlist:
+                    say("Note: this video has no %s subtitles." % options.get("subtitles"))
             except Exception as e:
                 error = clean_error(e)
+                if subtitles and "subtitle" in error.lower():
+                    # Subtitles are a bonus; never let them stop the download.
+                    say("Note: the subtitles could not be downloaded; trying without them.")
+                    subtitles = False
+                    continue
                 if "Unsupported URL" in error or "DRM" in error or "No video could be found" in error:
                     break
+                i += 1
                 continue
         files = collect(folder)
+        # Leftover cover images and subtitle files are not downloads.
         if mp3 or audio:
-            # Leftover cover images are not downloads.
             files = [f for f in files if ext_of(f) not in IMAGE_EXT] or files
+        files = [f for f in files if ext_of(f) not in SUBTITLE_EXT] or files
         if mp3 and files and not all(f.lower().endswith(".mp3") for f in files):
             error = "The audio could not be converted to MP3."
+            i += 1
             continue
         if files and not looks_unmerged(files):
             return tidy_media_names(files)
         if files:
             error = "The video and sound could not be joined (ffmpeg is missing)."
+        i += 1
     empty(folder)
     raise Failed(error or "yt-dlp found nothing to download.")
 
@@ -814,7 +1113,7 @@ def ask_playlist_count(mode, url, options):
     if most > 1:
         choices.append("Choose a number")
     with open(PLAYLIST_FILE, "w", encoding="utf-8") as f:
-        json.dump({"url": url, "mode": mode, "title": title, "options": options,
+        json.dump({"url": url, "mode": mode, "title": title, "options": dict(options),
                    "most": most}, f)
     with open(CHOICES_FILE, "w", encoding="utf-8") as f:
         f.write("\n".join(choices))
@@ -842,7 +1141,7 @@ def run_playlist(lines):
     say("Downloading %d from %s" % (amount, title))
     files = try_ytdlp(job["url"], new_folder("playlist"), audio=(job.get("mode") == "audio"),
                       options=job.get("options"), playlist=amount)
-    folder = os.path.join(VISIBLE_DIR, safe_name(title, "Playlist"))
+    folder = os.path.join(VISIBLE_DIR, PLAYLISTS_FOLDER, safe_name(title, "Playlist"))
     n = 2
     base = folder
     while os.path.exists(folder):
@@ -850,16 +1149,21 @@ def run_playlist(lines):
         n += 1
     os.makedirs(folder)
     for src in files:
-        shutil.move(src, os.path.join(folder, os.path.basename(src)))
+        dest = os.path.join(folder, os.path.basename(src))
+        shutil.move(src, dest)
+        os.utime(dest)
     what = "video" if job.get("mode") == "video" else "track"
     what += "" if len(files) == 1 else "s"
     missing = amount - len(files)
     note = (" %d could not be downloaded." % missing) if missing > 0 else ""
     with open(MESSAGE_FILE, "w", encoding="utf-8") as f:
-        f.write("Saved %d %s in Files › On My iPhone › a-Shell › AnyDL › %s.%s"
+        f.write("Saved %d %s in Files › On My iPhone › a-Shell › AnyDL › Playlists › %s.%s"
                 % (len(files), what, os.path.basename(folder), note))
     with open(OPEN_FILE, "w", encoding="utf-8") as f:
-        f.write("shareddocuments://" + urllib.parse.quote(os.path.realpath(folder)))
+        f.write(files_link(folder))
+    JOB.update(url=job["url"], mode=job.get("mode", "video"))
+    record_history(os.path.basename(folder), len(files), folder)
+    write_library_summary()
     return len(files)
 
 
@@ -1003,7 +1307,7 @@ def pick_size(sizes, quality):
     """From [(short side, link)], the largest within the quality setting, or
     else the smallest; the largest of all for Best."""
     sizes = sorted(sizes)
-    limit = QUALITY_HEIGHTS.get((quality or "").lower())
+    limit = quality_height(quality)
     if not limit:
         return sizes[-1][1]
     fitting = [s for s in sizes if s[0] <= limit]
@@ -1150,7 +1454,7 @@ def scan_page(url, text, mode):
         return download_items(pool, url)
     pool = pool[:MENU_LIMIT]
     with open(CANDIDATES_FILE, "w", encoding="utf-8") as f:
-        json.dump({"page": url, "items": pool}, f)
+        json.dump({"page": url, "items": pool, "mode": mode}, f)
     with open(CHOICES_FILE, "w", encoding="utf-8") as f:
         f.write("\n".join(label_for(i, k, u) for i, (k, u) in enumerate(pool, 1)))
     raise NeedPick()
@@ -1172,6 +1476,7 @@ def run_pick(lines):
                 picked.append(item)
     if not picked:
         raise Failed("Nothing was selected.")
+    JOB.update(url=data.get("page"), mode=data.get("mode") or "file")
     return download_items(picked, data.get("page"))
 
 
@@ -1190,6 +1495,7 @@ def read_job():
         lines = sys.argv[1:]
     options = dict(DEFAULT_OPTIONS)
     payload = []
+    lines = [l.lstrip("\ufeff") for l in lines]
     for line in lines:
         m = re.match(r"^([a-z]+)=(.*)$", line)
         if m:
@@ -1199,7 +1505,7 @@ def read_job():
     if not payload:
         return None, [], options
     mode = payload[0].lower()
-    if mode in ("pick", "playlist"):
+    if mode in ("pick", "playlist", "again", "clear"):
         return mode, payload[1:], options
     rest = " ".join(payload[1:]) if mode in MODES else " ".join(payload)
     if mode not in MODES:
@@ -1286,13 +1592,29 @@ def run(mode, url, options=None):
 
 
 def main():
+    global OPTIONS
     os.makedirs(BASE, exist_ok=True)
     os.chdir(BASE)
     write_status("The download did not finish. Run the shortcut again and wait for a-Shell to return.")
     mode, args, options = read_job()
+    OPTIONS = options
     cleanup_previous(keep_candidates=(mode in ("pick", "playlist")))
     say("AnyDL %s" % VERSION)
+    migrate_library()
     try:
+        if mode == "clear":
+            clear_library(" ".join(args))
+            write_status("CLEARED")
+            write_library_summary()
+            back_to_shortcuts()
+            sys.exit(0)
+        prune_library()
+        if mode == "again":
+            entry = history_entry(args)
+            mode, args = entry.get("mode") or "video", [entry["url"]]
+            if mode not in MODES:
+                mode = "video"
+            say("Downloading again: %s" % entry.get("title", ""))
         if mode == "pick":
             files = publish(run_pick(args))
         elif mode == "playlist":
@@ -1305,6 +1627,7 @@ def main():
         else:
             if not args:
                 finish(error="No link was given.")
+            JOB.update(url=args[0], mode=mode)
             say("%s: %s" % (mode, args[0]))
             check_for_update(options)
             weekly_update()

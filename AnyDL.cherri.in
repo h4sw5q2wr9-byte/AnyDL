@@ -1,11 +1,18 @@
-// AnyDL - download whatever a link points to, then preview it.
+// AnyDL - download whatever a link points to, and edit videos and photos.
 // The downloader itself is anydl.py, embedded below as base64 by build.py
-// and run inside the a-Shell app.
+// and run inside the a-Shell app. The media tools use iOS's own actions.
+//
+// build.py also fills in:
+//   __SCRIPT_B64__, __WELCOME_B64__   embedded files
+//   __VERSION__, __VERSION_NUM__      "3.0" and 3000, from anydl.py
+//   @@CARD(title | subtitle | icon name)@@  a menu row: a vCard with an icon from
+//                                      icons/<icon>.png; the subtitle may
+//                                      contain {@variables}
 
 #define name AnyDL
 #define color blue
 #define glyph circledDownArrow
-#define inputs url, text, webpage
+#define inputs url, text, webpage, image, media, file
 #define from sharesheet
 #define noinput getclipboard
 
@@ -13,6 +20,10 @@
 #include 'actions/text'
 #include 'actions/crypto'
 #include 'actions/documents'
+#include 'actions/media'
+#include 'actions/images'
+#include 'actions/photos'
+#include 'actions/sharing'
 
 // Keep a blank line after each definition: the compiler swallows the next line otherwise.
 action 'AsheKube.app.a-Shell.ExecuteCommandIntent' aShellRun(text command: 'command', text openWindow: 'openWindow', bool keepGoing: 'keepGoing') {
@@ -27,14 +38,19 @@ action 'AsheKube.app.a-Shell.GetFileIntent' aShellGet(text fileName: 'fileName',
     "ShowWhenRun": false
 }
 
+// Get Details of Files. Cherri's own getFileDetail() passes the file as
+// WFFolder; real shortcuts use WFInput.
+action 'properties.files' fileDetailOf(variable file: 'WFInput', text detail: 'WFContentItemPropertyName')
+
 /* AnyDL runs in two halves and never waits for a-Shell, so it can never be
    left running in the background:
-   - Started normally, it asks what to download, starts a-Shell, and ends.
+   - Started normally, it shows the menu; a download starts a-Shell and ends.
    - a-Shell shows a single download in its own preview. Only when there is
-     something to show here (a choice, a summary, an error, several files)
-     does the script start AnyDL again, with the text anydl-return as input. */
+     something to show here (a choice, a summary, an error, several files,
+     saving to Photos) does the script start AnyDL again, with the text
+     anydl-return as input. */
 
-/* Second half: results from a-Shell. */
+/* ------------------------------------------------ Second half: results. */
 @input = "{ShortcutInput}"
 if @input contains "anydl-return" {
     const statusFile = aShellGet("anydl_status.txt", true, true)
@@ -52,7 +68,7 @@ if @input contains "anydl-return" {
         stop()
     }
     if @status == "PLAYLIST" {
-        /* A playlist, channel or profile: ask how many, then download. */
+        /* A playlist, channel or profile: all, or a typed amount. */
         const askFile = aShellGet("anydl_message.txt", true, true)
         const amountsFile = aShellGet("anydl_choices.txt", true, true)
         const amounts = splitText("{amountsFile}", "\n")
@@ -81,23 +97,44 @@ if @input contains "anydl-return" {
         }
         stop()
     }
-    if @status != "OK" {
-        alert("{@status}", "AnyDL")
+    if @status == "PHOTOS" {
+        /* After download: Save to Photos. The script only asks for this for
+           photos and videos small enough to fetch from a-Shell. */
+        const photoList = aShellGet("anydl_files.txt", true, true)
+        const photoNames = splitText("{photoList}", "\n")
+        @savedCount = 0
+        for photoName in photoNames {
+            const photoFile = aShellGet("{@photoName}", true, true)
+            savePhoto(photoFile)
+            @savedCount += 1
+        }
+        showNotification("Saved {@savedCount} to Photos. Also in Files › a-Shell › AnyDL.", "AnyDL")
         stop()
     }
-    /* Several files: preview them here, where you can swipe through them. */
-    const listFile = aShellGet("anydl_files.txt", true, true)
-    const names = splitText("{listFile}", "\n")
-    const downloads = for fileName in names {
-        aShellGet("{@fileName}", true, true)
+    if @status == "CLEARED" {
+        /* Settings › Clear downloads: say what was deleted, then the menu. */
+        const clearedFile = aShellGet("anydl_message.txt", true, true)
+        alert("{clearedFile}", "Clear downloads")
+    } else {
+        if @status != "OK" {
+            alert("{@status}", "AnyDL")
+            stop()
+        }
+        /* Several files: preview them here, where you can swipe through them. */
+        const listFile = aShellGet("anydl_files.txt", true, true)
+        const names = splitText("{listFile}", "\n")
+        const downloads = for fileName in names {
+            aShellGet("{@fileName}", true, true)
+        }
+        quicklook(downloads)
+        stop()
     }
-    quicklook(downloads)
-    stop()
 }
 
-/* First run: a welcome page with the setup steps, shown before anything
-   needs a-Shell, so someone without it is told to install it. The flag lives
-   in the Shortcuts folder for the same reason. */
+/* ------------------------------------------------ First run: welcome. */
+/* A welcome page with the setup steps, shown before anything needs a-Shell,
+   so someone without it is told to install it. The flag lives in the
+   Shortcuts folder for the same reason. */
 const welcomeText = "__WELCOME_B64__"
 const welcomeData = base64Decode(welcomeText)
 const welcomePage = setName(welcomeData, "Welcome to AnyDL.html", true)
@@ -118,10 +155,37 @@ if !@welcomed {
     }
 }
 
-/* First half. Saved settings, as key=value lines; a missing file means the
-   defaults. The downloader reads them too. */
+/* ------------------------------------------------ Settings. */
+/* Saved in a-Shell as key=value lines. Values are stored as shown, and the
+   downloader reads them too. The defaults follow the saved ones, so the
+   first match is the saved value when there is one. */
 const settingsFile = aShellGet("anydl_settings.txt", false, true)
 @settings = "{settingsFile}"
+@withDefaults = "{@settings}\nquality=Best\nfps=Any\ncodec=Most compatible\naudio=Original\nsubtitles=Off\nafter=Preview\nkeep=Forever\nupdates=On"
+const qualityFound = matchText('quality=[^\n]*', "{@withDefaults}")
+const qualityLine = getFirstItem(qualityFound)
+@quality = replaceText("quality=", "", "{qualityLine}")
+const fpsFound = matchText('fps=[^\n]*', "{@withDefaults}")
+const fpsLine = getFirstItem(fpsFound)
+@fps = replaceText("fps=", "", "{fpsLine}")
+const codecFound = matchText('codec=[^\n]*', "{@withDefaults}")
+const codecLine = getFirstItem(codecFound)
+@codec = replaceText("codec=", "", "{codecLine}")
+const audioFound = matchText('audio=[^\n]*', "{@withDefaults}")
+const audioLine = getFirstItem(audioFound)
+@audio = replaceText("audio=", "", "{audioLine}")
+const subtitlesFound = matchText('subtitles=[^\n]*', "{@withDefaults}")
+const subtitlesLine = getFirstItem(subtitlesFound)
+@subtitles = replaceText("subtitles=", "", "{subtitlesLine}")
+const afterFound = matchText('after=[^\n]*', "{@withDefaults}")
+const afterLine = getFirstItem(afterFound)
+@after = replaceText("after=", "", "{afterLine}")
+const keepFound = matchText('keep=[^\n]*', "{@withDefaults}")
+const keepLine = getFirstItem(keepFound)
+@keep = replaceText("keep=", "", "{keepLine}")
+const updatesFound = matchText('updates=[^\n]*', "{@withDefaults}")
+const updatesLine = getFirstItem(updatesFound)
+@updates = replaceText("updates=", "", "{updatesLine}")
 
 /* A newer version found by the downloader's daily check, offered once. */
 const updateFile = aShellGet("anydl_update.txt", false, true)
@@ -130,7 +194,7 @@ if @update contains "." {
     const seenText = "seen"
     const seenFile = setName(seenText, "anydl_update.txt", true)
     aShellPut(seenFile, true)
-    menu "AnyDL {@update} is available" {
+    menu "AnyDL {@update} is available (you have __VERSION__)" {
         item "Update now":
             openURL("https://github.com/h4sw5q2wr9-byte/AnyDL/releases/latest")
             stop()
@@ -139,127 +203,368 @@ if @update contains "." {
     }
 }
 
-/* 1. The link to download: the shared item, else the clipboard. If there is
-      none, the link is asked for after the menu, so Settings needs none. */
+/* ------------------------------------------------ What was shared. */
+/* A link (shared, or on the clipboard) goes to the download menu. A photo,
+   video or file shared to AnyDL goes straight to the media tools. */
 const found = getURLs("{ShortcutInput}")
 @link = getFirstItem(found)
+@shared
+@startTools = false
+if !@link {
+    if @input !contains "anydl-return" {
+        const inputKind = typeOf(ShortcutInput)
+        @kind = "{inputKind}"
+        if @kind contains "Image" || @kind contains "Media" || @kind contains "File" {
+            @shared = ShortcutInput
+            @startTools = true
+        }
+    }
+}
 @heading = "AnyDL"
 if @link {
     const site = getURLDetail("{@link}", "Host")
     @heading = "Download from {site}"
 }
 
-/* 2. Main menu. */
-const iconVideo = "__ICON_VIDEO__"
-const iconAudio = "__ICON_AUDIO__"
-const iconGallery = "__ICON_GALLERY__"
-const iconFile = "__ICON_FILE__"
-const iconSettings = "__ICON_SETTINGS__"
-@items: array
-@items += makeVCard("Download Video", "Videos, GIFs and clips", iconVideo)
-@items += makeVCard("Download Audio", "Music, or the sound of a video", iconAudio)
-@items += makeVCard("Download Gallery", "Images, albums and photo posts", iconGallery)
-@items += makeVCard("Download File", "Documents, archives, anything linked", iconFile)
-@items += makeVCard("Settings", "Video quality, audio format, updates", iconSettings)
-@menuText = "{@items}"
-@menuFile = setName(@menuText, "menu.vcf", true)
-@menuCards = @menuFile.contact
-/* The main menu comes back after Settings; choosing a download leaves the
-   loop by ending the shortcut once a-Shell has been started. */
-repeat round for 20 {
-@choice = chooseFromList(@menuCards, @heading)
-@choiceName = "{@choice}"
+/* ------------------------------------------------ Main menu. */
+/* The menu comes back after Media tools, My downloads and Settings; a
+   download ends the shortcut once a-Shell has been started. */
+@mainItems: array
+@mainItems += "@@CARD(Download Video|Videos, GIFs and clips|video)@@"
+@mainItems += "@@CARD(Download Audio|Music, or the sound of a video|audio)@@"
+@mainItems += "@@CARD(Download Gallery|Images, albums and photo posts|gallery)@@"
+@mainItems += "@@CARD(Download File|Documents, archives, anything linked|file)@@"
+@mainItems += "@@CARD(Media tools|Compress, trim, GIF, extract audio, convert|tools)@@"
+@mainItems += "@@CARD(My downloads|Your AnyDL folders and recent downloads|library)@@"
+@mainItems += "@@CARD(Settings|Quality, subtitles, after download, storage|settings)@@"
+@mainText = "{@mainItems}"
+@mainFile = setName(@mainText, "menu.vcf", true)
+@mainCards = @mainFile.contact
 
-/* Settings: change one at a time until Done, then back to the main menu.
-   Values are stored as shown. */
-if @choiceName contains "Settings" {
-    @quality = "Best"
-    if @settings contains "quality=1080p" {
-        @quality = "1080p"
-    }
-    if @settings contains "quality=720p" {
-        @quality = "720p"
-    }
-    if @settings contains "quality=480p" {
-        @quality = "480p"
-    }
-    if @settings contains "quality=Data saver" {
-        @quality = "Data saver"
-    }
-    if @settings contains "quality=Ask each time" {
-        @quality = "Ask each time"
-    }
-    @audio = "Original"
-    if @settings contains "audio=MP3" {
-        @audio = "MP3"
-    }
-    @updates = "On"
-    if @settings contains "updates=Off" {
-        @updates = "Off"
-    }
-    @settingsDone = false
-    repeat i for 20 {
-        if @settingsDone == false {
-        menu "Settings" {
-            item "Video quality: {@quality}":
-                @qualities = list("Best", "1080p", "720p", "480p", "Data saver", "Ask each time")
-                @quality = chooseFromList(@qualities, "Video quality")
-            item "Audio format: {@audio}":
-                @formats = list("Original", "MP3")
-                @audio = chooseFromList(@formats, "Audio format (MP3 adds the cover image)")
-            item "Check for updates: {@updates}":
-                @onOff = list("On", "Off")
-                @updates = chooseFromList(@onOff, "Check for updates once a day")
-            item "Help & setup guide":
-                quicklook(welcomePage)
-            item "Done":
-                @settingsDone = true
-        }
-        @settings = "quality={@quality}\naudio={@audio}\nupdates={@updates}"
-        const newSettingsFile = setName(@settings, "anydl_settings.txt", true)
-        aShellPut(newSettingsFile, true)
-        }
-    }
-}
-
-
-if @choiceName !contains "Settings" {
-if !@link {
-    @link = prompt("Paste the link to download", "URL")
-}
-@mode = "video"
-if @choiceName contains "Audio" {
-    @mode = "audio"
-}
-if @choiceName contains "Gallery" {
-    @mode = "gallery"
-}
-if @choiceName contains "File" {
-    @mode = "file"
-}
-
-/* Video quality for this download, when the setting says to ask. */
-@extra = ""
-if @mode == "video" {
-    if @settings contains "quality=Ask each time" {
-        @askQualities = list("Best", "1080p", "720p", "480p", "Data saver")
-        @pickedQuality = chooseFromList(@askQualities, "Video quality")
-        @extra = "quality={@pickedQuality}"
-    }
-}
-
-/* 3. Hand the downloader script and the job to a-Shell. */
+/* The downloader script, put into a-Shell before each a-Shell job. */
 const scriptText = "__SCRIPT_B64__"
 const scriptData = base64Decode(scriptText)
 const scriptFile = setName(scriptData, "anydl.py", true)
-aShellPut(scriptFile, true)
-const jobText = "{@mode}\n{@link}\n{@settings}\n{@extra}"
-const jobFile = setName(jobText, "anydl_job.txt", true)
-aShellPut(jobFile, true)
 
-/* 4. Start the download in a-Shell. This shortcut ends here; a-Shell shows
-      the result, or starts AnyDL again when it needs to. */
-aShellRun("cd $SHORTCUTS\npython anydl.py", "open", false)
-stop()
-}
+repeat round for 30 {
+    if @startTools == true {
+        @choiceName = "Media tools"
+        @startTools = false
+    } else {
+        const mainChoice = chooseFromList(@mainCards, @heading)
+        @choiceName = "{mainChoice}"
+    }
+
+    /* -------------------------------------------- Media tools. */
+    /* iOS's own actions: fast, and no a-Shell or app switching needed. */
+    if @choiceName == "Media tools" {
+        @toolItems: array
+        @toolItems += "@@CARD(Compress video|Make a video smaller to share or save space|compress)@@"
+        @toolItems += "@@CARD(Trim|Cut a video or song shorter|trim)@@"
+        @toolItems += "@@CARD(Make a GIF|Turn a video into an animated GIF|gif)@@"
+        @toolItems += "@@CARD(Extract audio|Save the sound of a video as M4A|extract)@@"
+        @toolItems += "@@CARD(Convert image|To JPEG, PNG or HEIF|convert)@@"
+        @toolItems += "@@CARD(Back|Return to the main menu|back)@@"
+        @toolText = "{@toolItems}"
+        @toolFile = setName(@toolText, "tools.vcf", true)
+        @toolCards = @toolFile.contact
+        const toolChoice = chooseFromList(@toolCards, "Media tools")
+        @tool = "{toolChoice}"
+        if @tool != "Back" {
+            if !@shared {
+                menu "Which one?" {
+                    item "Choose from Photos":
+                        @shared = selectPhotos()
+                    item "Choose from Files":
+                        @shared = selectFile()
+                    item "Latest in Photos":
+                        if @tool == "Convert image" {
+                            @shared = getLatestPhotos(1, false)
+                        } else {
+                            @shared = getLatestVideos(1)
+                        }
+                }
+            }
+            const sizeBefore = fileDetailOf(@shared, "File Size")
+            @result
+            if @tool == "Compress video" {
+                @sizes = list("Small · 540p", "Medium · 720p", "Large · 1080p", "HEVC 1080p · smallest file, sharp", "HEVC 4K · for 4K videos")
+                const sizePicked = chooseFromList(@sizes, "Compress to (now {sizeBefore})")
+                @size = "{sizePicked}"
+                if @size contains "HEVC 4K" {
+                    @result = encodeVideo(@shared, "HEVC 3840x2160")
+                }
+                if @size contains "HEVC 1080p" {
+                    @result = encodeVideo(@shared, "HEVC 1920×1080")
+                }
+                if @size contains "Small" {
+                    @result = encodeVideo(@shared, "960×540")
+                }
+                if @size contains "Medium" {
+                    @result = encodeVideo(@shared, "1280×720")
+                }
+                if @size contains "Large" {
+                    @result = encodeVideo(@shared, "1920×1080")
+                }
+            }
+            if @tool == "Trim" {
+                @result = trimVideo(@shared)
+            }
+            if @tool == "Make a GIF" {
+                @result = makeGIF(@shared)
+            }
+            if @tool == "Extract audio" {
+                @result = encodeAudio(@shared, "M4A")
+            }
+            if @tool == "Convert image" {
+                @imageFormats = list("JPEG", "PNG", "HEIF")
+                const formatPicked = chooseFromList(@imageFormats, "Convert to")
+                @imageFormat = "{formatPicked}"
+                if @imageFormat == "JPEG" {
+                    @result = convertToJPEG(@shared)
+                }
+                if @imageFormat == "PNG" {
+                    @result = convertImage(@shared, "PNG")
+                }
+                if @imageFormat == "HEIF" {
+                    @result = convertImage(@shared, "HEIF")
+                }
+            }
+            const sizeAfter = fileDetailOf(@result, "File Size")
+            menu "Done: {sizeBefore} → {sizeAfter}" {
+                item "Preview":
+                    quicklook(@result)
+                item "Save to Photos":
+                    savePhoto(@result)
+                    showNotification("Saved to Photos.", "AnyDL")
+                item "Save to Files":
+                    saveFilePrompt(@result)
+                item "Share":
+                    share(@result)
+            }
+        }
+    }
+
+    /* -------------------------------------------- My downloads. */
+    if @choiceName == "My downloads" {
+        const libraryFile = aShellGet("anydl_library.txt", false, true)
+        @libraryText = "{libraryFile}"
+        if !@libraryText {
+            alert("Nothing has been downloaded yet. Your downloads will appear here, and in Files › On My iPhone › a-Shell › AnyDL.", "My downloads")
+        } else {
+            const libraryLines = splitText("{@libraryText}", "\n")
+            @libraryLink = getFirstItem(libraryLines)
+            @librarySummary = getLastItem(libraryLines)
+            @libraryItems: array
+            @libraryItems += "@@CARD(Recent downloads|Download again or open the original link|recent)@@"
+            @libraryItems += "@@CARD(Open AnyDL folder|{@librarySummary}|library)@@"
+            @libraryItems += "@@CARD(Videos|Downloaded videos|video)@@"
+            @libraryItems += "@@CARD(Audio|Music and sound|music)@@"
+            @libraryItems += "@@CARD(Photos|Images and photo posts|photos)@@"
+            @libraryItems += "@@CARD(Files|Documents and other files|file)@@"
+            @libraryItems += "@@CARD(Playlists|One folder per playlist|playlists)@@"
+            @libraryItems += "@@CARD(Back|Return to the main menu|back)@@"
+            @libraryMenuText = "{@libraryItems}"
+            @libraryMenuFile = setName(@libraryMenuText, "library.vcf", true)
+            @libraryCards = @libraryMenuFile.contact
+            const libraryChoice = chooseFromList(@libraryCards, "My downloads")
+            @place = "{libraryChoice}"
+            if @place == "Open AnyDL folder" {
+                openURL("{@libraryLink}")
+                stop()
+            }
+            if @place == "Videos" || @place == "Audio" || @place == "Photos" || @place == "Files" || @place == "Playlists" {
+                openURL("{@libraryLink}/{@place}")
+                stop()
+            }
+            if @place == "Recent downloads" {
+                const historyFile = aShellGet("anydl_history.txt", false, true)
+                @historyText = "{historyFile}"
+                if !@historyText {
+                    alert("No downloads yet.", "Recent downloads")
+                } else {
+                    const historyLines = splitText("{@historyText}", "\n")
+                    const historyPicked = chooseFromList(historyLines, "Recent downloads")
+                    @historyLine = "{historyPicked}"
+                    const numberFound = matchText('^\d+', "{@historyLine}")
+                    const numberText = getFirstItem(numberFound)
+                    const historyNumber = number(numberText)
+                    menu "{@historyLine}" {
+                        item "Download again":
+                            const againText = "again\n{numberText}\n{@settings}"
+                            const againFile = setName(againText, "anydl_job.txt", true)
+                            aShellPut(scriptFile, true)
+                            aShellPut(againFile, true)
+                            aShellRun("cd $SHORTCUTS\npython anydl.py", "open", false)
+                            stop()
+                        item "Open the original link":
+                            const linksFile = aShellGet("anydl_history_links.txt", true, true)
+                            const historyLinks = splitText("{linksFile}", "\n")
+                            const originalLink = getListItem(historyLinks, historyNumber)
+                            openURL("{originalLink}")
+                            stop()
+                        item "Back":
+                            nothing()
+                    }
+                }
+            }
+        }
+    }
+
+    /* -------------------------------------------- Settings. */
+    if @choiceName == "Settings" {
+        const storageFile = aShellGet("anydl_library.txt", false, true)
+        const storageLines = splitText("{storageFile}", "\n")
+        @storage = getLastItem(storageLines)
+        if !@storage {
+            @storage = "No downloads yet"
+        }
+        @settingsDone = false
+        repeat i for 30 {
+            if @settingsDone == false {
+                @settingItems: array
+                @settingItems += "@@CARD(Video quality|{@quality}|quality)@@"
+                @settingItems += "@@CARD(Frame rate|{@fps}|fps)@@"
+                @settingItems += "@@CARD(Video format|{@codec}|codec)@@"
+                @settingItems += "@@CARD(Audio format|{@audio}|music)@@"
+                @settingItems += "@@CARD(Subtitles|{@subtitles}|subtitles)@@"
+                @settingItems += "@@CARD(After download|{@after}|after)@@"
+                @settingItems += "@@CARD(Keep downloads|{@keep}|keep)@@"
+                @settingItems += "@@CARD(Clear downloads|{@storage}|clear)@@"
+                @settingItems += "@@CARD(Updates|Automatic checks: {@updates} · Check now|updates)@@"
+                @settingItems += "@@CARD(Help & setup guide|How to set up and use AnyDL|help)@@"
+                @settingItems += "@@CARD(Back|Return to the main menu|back)@@"
+                @settingText = "{@settingItems}"
+                @settingFile = setName(@settingText, "settings.vcf", true)
+                @settingCards = @settingFile.contact
+                const settingChoice = chooseFromList(@settingCards, "Settings · AnyDL __VERSION__")
+                @setting = "{settingChoice}"
+                if @setting == "Video quality" {
+                    @qualities = list("Best", "4K (2160p)", "1440p", "1080p", "720p", "480p", "360p (Data saver)", "240p", "Ask each time")
+                    @quality = chooseFromList(@qualities, "Video quality. Upright and wide videos alike; if a video has no such size, the closest smaller one is used.")
+                }
+                if @setting == "Frame rate" {
+                    @rates = list("Any", "Up to 60 fps", "Up to 30 fps")
+                    @fps = chooseFromList(@rates, "Frame rate. Lower frame rates make smaller files.")
+                }
+                if @setting == "Video format" {
+                    @codecs = list("Most compatible", "Highest quality")
+                    @codec = chooseFromList(@codecs, "Most compatible: H.264, plays everywhere including Photos; YouTube offers it up to 1080p. Highest quality: also VP9 and AV1, needed for YouTube 1440p and 4K; may not play in every app.")
+                }
+                if @setting == "Audio format" {
+                    @audioFormats = list("Original", "MP3")
+                    @audio = chooseFromList(@audioFormats, "Audio format. MP3 adds the cover image and title.")
+                }
+                if @setting == "Subtitles" {
+                    @languages = list("Off", "English", "Dutch", "German", "French", "Spanish", "Portuguese", "Italian", "Polish", "Turkish", "Arabic", "Hindi", "Indonesian", "Japanese", "Korean", "Chinese")
+                    @subtitles = chooseFromList(@languages, "Subtitles built into downloaded videos, when the video has them. Turn them on in the player.")
+                }
+                if @setting == "After download" {
+                    @afterModes = list("Preview", "Save to Photos", "Keep in Files")
+                    @after = chooseFromList(@afterModes, "After download. Save to Photos works for photos and videos up to 50 MB; bigger ones open in a preview. Everything is also kept in Files.")
+                }
+                if @setting == "Keep downloads" {
+                    @keepModes = list("Forever", "1 month", "1 week", "1 day")
+                    @keep = chooseFromList(@keepModes, "Delete downloads from the AnyDL folder automatically after:")
+                }
+                if @setting == "Clear downloads" {
+                    menu "Clear downloads ({@storage})" {
+                        item "Delete everything":
+                            @clearWhat = "all"
+                        item "Delete downloads older than a week":
+                            @clearWhat = "old"
+                        item "Cancel":
+                            @clearWhat = ""
+                    }
+                    if @clearWhat {
+                        const clearText = "clear\n{@clearWhat}"
+                        const clearFile = setName(clearText, "anydl_job.txt", true)
+                        aShellPut(scriptFile, true)
+                        aShellPut(clearFile, true)
+                        aShellRun("cd $SHORTCUTS\npython anydl.py", "open", false)
+                        stop()
+                    }
+                }
+                if @setting == "Updates" {
+                    menu "Updates · you have AnyDL __VERSION__" {
+                        item "Check now":
+                            const releaseData = downloadURL("https://api.github.com/repos/h4sw5q2wr9-byte/AnyDL/releases/latest")
+                            const release = getDictionary(releaseData)
+                            @latestTag = "{release['tag_name']}"
+                            const tagFound = matchText('\d+\.\d+', "{@latestTag}")
+                            const tagText = getFirstItem(tagFound)
+                            const tagParts = splitText("{tagText}", ".")
+                            const majorText = getFirstItem(tagParts)
+                            const minorText = getLastItem(tagParts)
+                            @latestNumber = number(majorText)
+                            @latestNumber *= 1000
+                            const minorNumber = number(minorText)
+                            @latestNumber += minorNumber
+                            @currentNumber = __VERSION_NUM__
+                            if @latestNumber > @currentNumber {
+                                menu "AnyDL {tagText} is available (you have __VERSION__)" {
+                                    item "Update now":
+                                        openURL("https://github.com/h4sw5q2wr9-byte/AnyDL/releases/latest")
+                                        stop()
+                                    item "Later":
+                                        nothing()
+                                }
+                            } else {
+                                alert("You have the latest version, AnyDL __VERSION__.", "Updates")
+                            }
+                        item "Automatic checks: On":
+                            @updates = "On"
+                        item "Automatic checks: Off":
+                            @updates = "Off"
+                    }
+                }
+                if @setting == "Help & setup guide" {
+                    quicklook(welcomePage)
+                }
+                if @setting == "Back" {
+                    @settingsDone = true
+                }
+                @settings = "quality={@quality}\nfps={@fps}\ncodec={@codec}\naudio={@audio}\nsubtitles={@subtitles}\nafter={@after}\nkeep={@keep}\nupdates={@updates}"
+                const newSettingsFile = setName(@settings, "anydl_settings.txt", true)
+                aShellPut(newSettingsFile, true)
+            }
+        }
+    }
+
+    /* -------------------------------------------- Downloads. */
+    if @choiceName beginsWith "Download " {
+        if !@link {
+            @link = prompt("Paste the link to download", "URL")
+        }
+        @mode = "video"
+        if @choiceName == "Download Audio" {
+            @mode = "audio"
+        }
+        if @choiceName == "Download Gallery" {
+            @mode = "gallery"
+        }
+        if @choiceName == "Download File" {
+            @mode = "file"
+        }
+
+        /* Video quality for this download, when the setting says to ask. */
+        @extra = ""
+        if @mode == "video" {
+            if @quality == "Ask each time" {
+                @askQualities = list("Best", "4K (2160p)", "1440p", "1080p", "720p", "480p", "360p (Data saver)", "240p")
+                @pickedQuality = chooseFromList(@askQualities, "Video quality")
+                @extra = "quality={@pickedQuality}"
+            }
+        }
+
+        /* Hand the downloader script and the job to a-Shell, and start it.
+           This shortcut ends here; a-Shell shows the result, or starts
+           AnyDL again when it needs to. */
+        aShellPut(scriptFile, true)
+        const jobText = "{@mode}\n{@link}\n{@settings}\n{@extra}"
+        const jobFile = setName(jobText, "anydl_job.txt", true)
+        aShellPut(jobFile, true)
+        aShellRun("cd $SHORTCUTS\npython anydl.py", "open", false)
+        stop()
+    }
 }

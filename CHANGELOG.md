@@ -1,6 +1,39 @@
 # Changelog
 
-## 2.8
+## 3.0
+
+The first release with a full redesign: a menu with icons, media tools, an
+organized library, and many more settings. (2.8 was never released; its
+changes are included here.)
+
+**New**
+
+- **Media tools**: compress a video (540p, 720p, 1080p or HEVC, showing the
+  size before and after), trim, make a GIF, extract the audio, convert an
+  image. They use iOS's own actions. Share a photo or video to AnyDL to
+  start there.
+- **My downloads**: downloads are sorted into Videos, Audio, Photos, Files
+  and Playlists in Files, with a list of recent downloads to download again
+  or open the original link.
+- **Settings** as a list with icons, each row showing its current value:
+  video quality (Best, 4K, 1440p, 1080p, 720p, 480p, 360p Data saver, 240p,
+  Ask each time), frame rate, video format (most compatible or highest
+  quality), audio format (original or MP3 with cover image), subtitles in 15
+  languages, after download (preview, save to Photos, keep in Files), how
+  long to keep downloads, clear downloads, updates with Check now, and help.
+- **Playlists, channels and profiles**: download all, or type how many, up to
+  100, into their own folder.
+- **Update check**: once a day, and on demand from Settings.
+- A welcome page on first run with the setup steps and a link to a-Shell.
+
+**Fixed**
+
+- The quality setting now works for upright videos (TikTok, Shorts), and
+  for X videos from the FxTwitter fallback.
+- Leaving Settings returns to the main menu.
+- Subtitles that fail to download no longer stop the video.
+
+## 2.8 (not released)
 
 - **Settings**, a new menu item: video quality (Best, 1080p, 720p, 480p,
   Data saver or Ask each time), audio format (Original or MP3 with cover

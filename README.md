@@ -16,6 +16,9 @@ Look, ready to save to Photos or Files.
 | <img src="icons/audio.png" width="32" alt=""> | **Download Audio** | Music, or just the sound of a video. |
 | <img src="icons/gallery.png" width="32" alt=""> | **Download Gallery** | Images, albums and photo posts through [gallery-dl](https://github.com/mikf/gallery-dl), or the images on the page. |
 | <img src="icons/file.png" width="32" alt=""> | **Download File** | Documents, archives and other files linked on a page. |
+| <img src="icons/tools.png" width="32" alt=""> | **Media tools** | Compress or trim a video, make a GIF, extract the audio, convert an image. |
+| <img src="icons/library.png" width="32" alt=""> | **My downloads** | Your downloads sorted into folders, and recent downloads to get again. |
+| <img src="icons/settings.png" width="32" alt=""> | **Settings** | Quality, frame rate, subtitles, MP3, what happens after a download, storage. |
 
 - **Direct links just work.** If the link is already a file, it is downloaded
   whichever mode you pick.
@@ -25,10 +28,13 @@ Look, ready to save to Photos or Files.
   hashtags, links or emoji.
 - **Honest errors.** If a download fails, the alert shows the downloader's own
   message.
-- **Your choice of quality.** Best, 1080p, 720p, 480p or Data saver, or
-  ask every time. Audio can be saved as MP3 with its cover image.
-- **Playlists, channels and profiles.** Choose how many to download, up to
-  100; they are saved together in a folder in the Files app.
+- **Your choice of quality.** Best, 4K, 1440p, 1080p, 720p, 480p, 360p or
+  240p, a frame-rate limit, or ask every time. Audio can be saved as MP3
+  with its cover image, and videos can get built-in subtitles.
+- **Playlists, channels and profiles.** Download all, or choose how many,
+  up to 100; they are saved together in a folder in the Files app.
+- **An organized library.** Everything lands in Files, sorted into Videos,
+  Audio, Photos, Files and Playlists, with a list of recent downloads.
 - **Stays current.** The downloaders update themselves once a week, and
   AnyDL tells you when a new version of itself is out.
 - **Better X support.** When X hides a post's video from logged-out
@@ -64,40 +70,83 @@ Start AnyDL in any of these ways:
 - Copy a link, then run AnyDL. It reads the clipboard.
 - Run AnyDL with nothing copied and paste the link when asked.
 
-Choose a mode from the menu. a-Shell opens, downloads, and shows the result
-in Quick Look right there; use the share button to save it to Photos, Files,
-or anywhere else. Downloads are also kept in the Files app under
-**On My iPhone › a-Shell › AnyDL**.
+Choose what to download. a-Shell opens, downloads, and shows the result in
+Quick Look right there; use the share button to save it to Photos, Files, or
+anywhere else. To skip the preview, set **After download** to
+**Save to Photos** or **Keep in Files**.
 
 When one download produces several files, such as a gallery, AnyDL switches
 back to Shortcuts and previews them there, so you can swipe through them. If
 one of them is over 50 MB, the largest opens in a-Shell instead, because
-Shortcuts cannot reliably receive large files from a-Shell; the rest are in
-the AnyDL folder.
+Shortcuts cannot reliably receive large files from a-Shell.
+
+### My downloads
+
+Everything AnyDL downloads is kept in the Files app under
+**On My iPhone › a-Shell › AnyDL**, sorted into folders:
+
+| Folder | What goes there |
+| --- | --- |
+| Videos | Videos and GIF videos |
+| Audio | Music and sound |
+| Photos | Images |
+| Files | Documents, archives and everything else |
+| Playlists | One folder per playlist, channel or profile |
+
+**My downloads** in the menu opens these folders and lists your recent
+downloads, so you can download one again or open its original link. How
+long downloads are kept is up to you (Settings › Keep downloads), and
+Settings › Clear downloads frees the space at once.
+
+### Media tools
+
+These use iOS's own video and image actions, so they are fast and need no
+a-Shell. Share a photo or video to AnyDL to start here, or pick one from
+Photos or Files.
+
+| Tool | What it does |
+| --- | --- |
+| Compress video | Makes a video smaller: 540p, 720p, 1080p, or HEVC for the smallest file at the same sharpness. Shows the size before and after. |
+| Trim | Cuts a video or song shorter, with iOS's trim screen. |
+| Make a GIF | Turns a video into an animated GIF. |
+| Extract audio | Saves the sound of a video as M4A. |
+| Convert image | To JPEG, PNG or HEIF. |
+
+Each result can be previewed, saved to Photos or Files, or shared.
 
 ### Settings
 
-Choose **Settings** in the menu to change:
+Each row in **Settings** shows its current value.
 
 | Setting | Options |
 | --- | --- |
-| Video quality | Best (default), 1080p, 720p, 480p, Data saver (360p), Ask each time |
+| Video quality | Best (default), 4K, 1440p, 1080p, 720p, 480p, 360p (Data saver), 240p, Ask each time |
+| Frame rate | Any (default), Up to 60 fps, Up to 30 fps |
+| Video format | Most compatible (default; H.264, plays everywhere), Highest quality (also VP9 and AV1) |
 | Audio format | Original (default), MP3 with cover image |
-| Check for updates | On (default), Off |
+| Subtitles | Off (default), or one of 15 languages, built into the video |
+| After download | Preview (default), Save to Photos, Keep in Files |
+| Keep downloads | Forever (default), 1 month, 1 week, 1 day |
+| Clear downloads | Delete everything, or downloads older than a week |
+| Updates | Check now, and automatic checks on or off |
+
+Quality means the short side of the picture, so an upright 720x1280 video
+is 720p. If a video has no such size, the closest smaller one is used, and
+a-Shell shows what you got. YouTube offers H.264 only up to 1080p, so for
+YouTube 1440p and 4K choose **Highest quality**.
 
 Above 360p, sites such as YouTube send video and sound separately, and
-joining them needs ffmpeg. The full a-Shell app is expected to have it; if it
-is missing, AnyDL says so and downloads the best single file instead. MP3
-needs ffmpeg too.
+joining them needs ffmpeg, which the full a-Shell app includes. Without it,
+AnyDL says so and downloads the best single file. MP3 and subtitles need
+ffmpeg too.
 
 ### Playlists
 
 Share a playlist, channel or profile (YouTube, TikTok, SoundCloud, Vimeo and
 other sites yt-dlp supports) and choose **Download Video** or
 **Download Audio**. Choose all, or type how many, then AnyDL saves them in
-**On My iPhone › a-Shell › AnyDL › (playlist name)**. These folders are kept;
-they are not cleared by the next download. From Files you can select them
-all and save them to Photos at once.
+**AnyDL › Playlists › (playlist name)**. From Files you can select them all
+and save them to Photos at once.
 
 ## How it works
 
@@ -128,9 +177,9 @@ files.
   not supported, and never will be.
 - **Not every site.** Some sites deliver video in ways that leave nothing to
   download.
-- **One download at a time.** Files from the previous run are cleared when
-  the next one starts, including large files in the AnyDL folder, so save
-  what you want to keep.
+- **Save to Photos up to 50 MB.** Bigger downloads open in a preview, where
+  the share button saves them.
+- **Subtitles** are only added when the video has them in that language.
 
 ## Troubleshooting
 
@@ -148,6 +197,8 @@ files.
 | An alert with a downloader error | The message comes from yt-dlp or gallery-dl and usually names the cause, such as a login requirement. |
 | A site stopped working | Sites change often. The downloaders update weekly; to force it, run `pip install -U yt-dlp gallery-dl` in a-Shell. |
 | I want to see the welcome page again | Settings › Help & setup guide. |
+| The AnyDL folder takes too much space | Settings › Clear downloads, or set Keep downloads to a shorter time. |
+| A compressed video is not smaller | It was already small or already compressed. Try a smaller size, or HEVC. |
 
 ## Privacy
 
@@ -156,8 +207,8 @@ account. It contacts:
 
 - the site you are downloading from;
 - PyPI, to install and update the downloaders;
-- GitHub, once a day, to see whether a new AnyDL release is out (switch this
-  off in Settings);
+- GitHub, once a day and when you tap Check now, to see whether a new AnyDL
+  release is out (switch the daily check off in Settings);
 - FxTwitter's public API (`api.fxtwitter.com`), only when X will not hand
   over a post's media; it receives that post's id.
 
