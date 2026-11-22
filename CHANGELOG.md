@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.7
+
+- X posts whose video or images X hides from logged-out visitors, such as
+  age-restricted posts, now download through
+  [FxTwitter](https://github.com/FxEmbed/FxEmbed)'s public API when yt-dlp or
+  gallery-dl cannot get them.
+
 ## 2.6
 
 - Downloads now open in a-Shell's own preview, with the same share button,

@@ -17,9 +17,9 @@ to show (status PICK, OK or an error), the script starts AnyDL again with
 download in a-Shell's own preview instead (see show_in_ashell).
 
 What each mode tries, after first checking whether the link itself is a file:
-    video    yt-dlp, then video found on the page
+    video    yt-dlp, then for X posts FxTwitter, then video found on the page
     audio    yt-dlp (audio only), then audio found on the page
-    gallery  gallery-dl, then images found on the page
+    gallery  gallery-dl, then for X posts FxTwitter, then images on the page
     file     documents, archives and media linked on the page
 """
 import html
@@ -39,7 +39,7 @@ import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
 
-VERSION = "2.6"
+VERSION = "2.7"
 
 BASE = os.environ.get("ANYDL_DIR") or os.environ.get("SHORTCUTS") or os.getcwd()
 TMP = os.path.join(BASE, "anydl_tmp")
@@ -675,6 +675,86 @@ def try_gallerydl(url, folder):
     return files
 
 
+# ---------------------------------------------------------------- X fallback
+
+# X hides the media of many posts from logged-out visitors (age-restricted
+# posts, for example), so yt-dlp and gallery-dl see the post but no video.
+# FxTwitter's public API (https://github.com/FxEmbed/FxEmbed) still returns
+# direct links to the files on X's own media servers for such posts.
+X_HOSTS = ("x.com", "twitter.com", "fxtwitter.com", "fixupx.com", "vxtwitter.com",
+           "fixvx.com", "twittpr.com", "nitter.net")
+FXTWITTER_API = "https://api.fxtwitter.com/status/%s"
+
+
+class FxAnswer(Failed):
+    """FxTwitter gave a definite answer, such as the post being deleted."""
+
+
+def x_status_id(url):
+    """The post id of an X / Twitter post link, or None."""
+    parts = urllib.parse.urlsplit(url)
+    host = (parts.hostname or "").lower()
+    if not any(host == h or host.endswith("." + h) for h in X_HOSTS):
+        return None
+    m = re.search(r"/status(?:es)?/(\d+)", parts.path)
+    return m.group(1) if m else None
+
+
+def fxtwitter_media(post_id):
+    """Return (post, [(kind, url)]) for an X post, via FxTwitter."""
+    req = urllib.request.Request(FXTWITTER_API % post_id,
+                                 headers={"User-Agent": "AnyDL/%s" % VERSION})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.load(resp)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            raise FxAnswer("This post does not exist or was deleted.")
+        if e.code == 401:
+            raise FxAnswer("This post is from a private account.")
+        raise Failed("FxTwitter: %s" % e)
+    except (OSError, ValueError) as e:
+        raise Failed("FxTwitter could not read this post (%s)." % type(e).__name__)
+    post = data.get("tweet") or {}
+    found = []
+    # The post's own media, or else the media of the post it quotes.
+    for source in (post, post.get("quote") or {}):
+        media = source.get("media") or {}
+        for video in media.get("videos") or []:
+            if video.get("url"):
+                found.append(("video", video["url"]))
+        for photo in media.get("photos") or []:
+            if photo.get("url"):
+                found.append(("image", photo["url"]))
+        if found:
+            return source, found
+    return post, found
+
+
+def try_fxtwitter(url, folder, kinds):
+    post_id = x_status_id(url)
+    if not post_id:
+        raise Failed("Not an X post.")
+    post, media = fxtwitter_media(post_id)
+    items = [link for kind, link in media if kind in kinds][:MAX_ITEMS]
+    if not items:
+        raise FxAnswer("No %s found in this post." % ("video" if "video" in kinds else "images"))
+    author = post.get("author") or {}
+    base = media_name(author.get("name") or author.get("screen_name") or "",
+                      post.get("text") or "", "Twitter", post.get("id") or post_id)
+    files = []
+    for n, link in enumerate(items, 1):
+        path = direct_download(link, folder)
+        ext = os.path.splitext(path)[1] or ".mp4"
+        name = base if len(items) == 1 else "%s %d" % (base, n)
+        target = os.path.join(folder, name + ext)
+        if target != path and not os.path.exists(target):
+            os.rename(path, target)
+            path = target
+        files.append(path)
+    return files
+
+
 # ---------------------------------------------------------------- page scan
 
 class _Links(HTMLParser):
@@ -882,6 +962,18 @@ def run(mode, url):
         except Failed as e:
             tool_error = str(e)
             say("  %s" % e)
+
+    if mode in ("video", "gallery") and x_status_id(url):
+        say("\nTrying FxTwitter...")
+        try:
+            kinds = ("video",) if mode == "video" else ("image",)
+            return try_fxtwitter(url, new_folder("fxtwitter"), kinds)
+        except Failed as e:
+            say("  %s" % e)
+            # Show FxTwitter's reason only when it is definite; otherwise
+            # the downloader's own error says more.
+            if isinstance(e, FxAnswer) or not tool_error:
+                tool_error = str(e)
 
     say("\nLooking through the page...")
     try:

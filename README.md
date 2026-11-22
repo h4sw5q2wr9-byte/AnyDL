@@ -26,6 +26,8 @@ Look, ready to save to Photos or Files.
 - **Honest errors.** If a download fails, the alert shows the downloader's own
   message.
 - **Stays current.** The downloaders update themselves once a week.
+- **Better X support.** When X hides a post's video from logged-out
+  visitors, AnyDL gets it through [FxTwitter](https://github.com/FxEmbed/FxEmbed).
 
 ## Requirements
 
@@ -85,8 +87,9 @@ files.
 
 ## Limitations
 
-- **No logins.** Posts that require a signed-in account, such as
-  age-restricted posts on X, cannot be downloaded.
+- **No logins.** Posts that require a signed-in account cannot be
+  downloaded. On X, the FxTwitter fallback covers most of these, but not
+  posts from private accounts.
 - **No DRM.** Protected streams from services such as Netflix or Spotify are
   not supported, and never will be.
 - **Not every site.** Some sites deliver video in ways that leave nothing to
@@ -109,8 +112,9 @@ files.
 ## Privacy
 
 AnyDL runs entirely on your device. It has no server, no analytics and no
-account. The only network requests are to the site you are downloading from
-and to PyPI, to install and update the downloaders.
+account. It contacts the site you are downloading from, PyPI to install and
+update the downloaders, and, only when X will not hand over a post's media,
+FxTwitter's public API (`api.fxtwitter.com`), which receives that post's id.
 
 ## Build from source
 
@@ -158,6 +162,7 @@ AnyDL stands on the work of others:
   [HubSign](https://routinehub.co) signs it.
 - Icons are from [Lucide](https://lucide.dev), under the ISC license. See
   [`icons/LUCIDE-LICENSE`](icons/LUCIDE-LICENSE).
+- [FxTwitter](https://github.com/FxEmbed/FxEmbed) provides the X fallback.
 - Inspired by [SW-DLT](https://github.com/net00-1/SW-DLT).
 
 AnyDL is an independent project and is not affiliated with any of them.
