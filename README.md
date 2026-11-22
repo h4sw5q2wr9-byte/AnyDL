@@ -270,6 +270,7 @@ compiles to Shortcuts.
 | `build.py` | Regenerates `AnyDL.cherri`. |
 | `icons/` | Menu icons. |
 | `tools/` | Scripts that compile and sign through the Cherri playground. |
+| `tests/` | The test suite. |
 
 ```sh
 python3 build.py
@@ -281,6 +282,11 @@ The scripts in `tools/` need Node.js with
 [Playwright](https://playwright.dev). You can also paste `AnyDL.cherri` into
 the [Cherri playground](https://playground.cherrilang.org), press build, and
 choose **Sign Shortcut**.
+
+Run the tests with `pip install pytest yt-dlp` and `python3 -m pytest tests`.
+They run offline: downloads come from a small local web site, and the
+shortcut source is checked for menu choices that match no row, missing
+icons, screens nobody draws, and menus longer than seven rows.
 
 To publish a release, update `CHANGELOG.md` and the version in `anydl.py`,
 rebuild, then push a tag such as `v2.3`. The release workflow attaches the

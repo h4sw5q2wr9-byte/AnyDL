@@ -60,6 +60,11 @@ changes are included here.)
 - Slow media tools show a notification while they work.
 - Subtitles are marked as the default track and no longer added twice for
   YouTube ("en" and "en-orig").
+- Compress video › HEVC 4K used a size name Shortcuts does not know.
+- A file without a file extension is no longer passed to a media tool.
+- A playlist with one video no longer offers "All 1 videos".
+- A test suite (104 tests) checks the downloader offline and the shortcut's
+  menus, and runs on every push.
 
 ## 2.8 (not released)
 

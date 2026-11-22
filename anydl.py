@@ -1467,8 +1467,12 @@ def ask_playlist_count(mode, url, options):
         raise Failed("This playlist is empty, or private.")
     what = "videos" if mode == "video" else "tracks"
     most = min(count, PLAYLIST_LIMIT)
-    choices = [("All %d %s" % (count, what)) if count <= PLAYLIST_LIMIT
-               else "First %d %s" % (PLAYLIST_LIMIT, what)]
+    if count == 1:
+        choices = ["Download the 1 %s" % what[:-1]]
+    elif count <= PLAYLIST_LIMIT:
+        choices = ["All %d %s" % (count, what)]
+    else:
+        choices = ["First %d %s" % (PLAYLIST_LIMIT, what)]
     if most > 1:
         choices.append("Choose a number")
     with open(PLAYLIST_FILE, "w", encoding="utf-8") as f:
@@ -1480,7 +1484,8 @@ def ask_playlist_count(mode, url, options):
         f.write("How many %s? (1 to %d)" % (what, most))
     more = "more than %d" % PLAYLIST_LIMIT if count > PLAYLIST_LIMIT else str(count)
     with open(MESSAGE_FILE, "w", encoding="utf-8") as f:
-        f.write("%s has %s %s. How many do you want?" % (nice_title(title) or "This playlist", more, what))
+        f.write("%s has %s %s. How many do you want?" % (nice_title(title) or "This playlist", more,
+                                                          what if count != 1 else what[:-1]))
     raise NeedPlaylistCount()
 
 

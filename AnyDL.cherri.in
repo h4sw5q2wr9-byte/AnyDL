@@ -52,6 +52,12 @@ action 'selectphoto' pickImageFromPhotos(): variable {
     "WFPhotoPickerTypes": "Images"
 }
 
+// Encode Media at HEVC 4K. Cherri's size list spells it "3840x2160" with a
+// plain x, which Shortcuts does not know; Shortcuts uses ×.
+action 'encodemedia' encodeVideoHEVC4K(variable video: 'WFMedia') {
+    "WFMediaSize": "HEVC 3840×2160"
+}
+
 /* AnyDL runs in two halves and never waits for a-Shell, so it can never be
    left running in the background:
    - Started normally, it shows the menu; a download starts a-Shell and ends.
@@ -445,7 +451,7 @@ repeat round for 60 {
             }
             const videoExtension = fileDetailOf(@media, "File Extension")
             @extension = lowercase("{videoExtension}")
-            if @videoTypes !contains @extension {
+            if @videoTypes !contains @extension || !@extension {
                 alert("That file is not a video (.{@extension}). Choose a video, or use Photo tools or Audio tools.", "Video tools")
             } else {
                 const videoSizeBefore = fileDetailOf(@media, "File Size")
@@ -457,7 +463,7 @@ repeat round for 60 {
                     @compression = "{compressPicked}"
                     showNotification("Compressing… the result opens when it is done.", "AnyDL", false)
                     if @compression contains "HEVC 4K" {
-                        @result = encodeVideo(@media, "HEVC 3840x2160")
+                        @result = encodeVideoHEVC4K(@media)
                     }
                     if @compression contains "HEVC · same 1080p" {
                         @result = encodeVideo(@media, "HEVC 1920×1080")
@@ -549,7 +555,7 @@ repeat round for 60 {
             }
             const photoExtension = fileDetailOf(@media, "File Extension")
             @extension = lowercase("{photoExtension}")
-            if @photoTypes !contains @extension {
+            if @photoTypes !contains @extension || !@extension {
                 alert("That file is not a photo (.{@extension}). Choose a photo, or use Video tools or Audio tools.", "Photo tools")
             } else {
                 const photoSizeBefore = fileDetailOf(@media, "File Size")
@@ -678,7 +684,7 @@ repeat round for 60 {
             }
             const audioExtension = fileDetailOf(@media, "File Extension")
             @extension = lowercase("{audioExtension}")
-            if @audioTypes !contains @extension {
+            if @audioTypes !contains @extension || !@extension {
                 alert("That file is not audio (.{@extension}). Choose an audio file, or use Video tools or Photo tools.", "Audio tools")
             } else {
                 const audioSizeBefore = fileDetailOf(@media, "File Size")
