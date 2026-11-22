@@ -55,6 +55,7 @@ JOB_FILE = os.path.join(BASE, "anydl_job.txt")
 STATUS_FILE = os.path.join(BASE, "anydl_status.txt")
 LIST_FILE = os.path.join(BASE, "anydl_files.txt")
 LARGE_FILE = os.path.join(BASE, "anydl_large.txt")
+PREVIOUS_FILE = os.path.join(BASE, "anydl_previous.txt")
 CHOICES_FILE = os.path.join(BASE, "anydl_choices.txt")
 CANDIDATES_FILE = os.path.join(BASE, "anydl_candidates.json")
 PLAYLIST_FILE = os.path.join(BASE, "anydl_playlist.json")
@@ -180,6 +181,8 @@ def finish(files=None, error=None):
         write_status("VIEW")
         say("\nDone: %d file%s, saved in Files > On My iPhone > a-Shell > AnyDL."
             % (len(shown), "" if len(shown) == 1 else "s"))
+        say("If you still see an earlier download, tap Done on it: a-Shell shows")
+        say("one preview at a time. This one is in the AnyDL folder in Files.")
         biggest = max(shown, key=os.path.getsize)
         show_in_ashell(biggest)
         sys.exit(0)
@@ -214,8 +217,13 @@ def move_visible(files):
 
 
 def cleanup_previous(keep_candidates=False):
-    """Delete the files left by the last run so storage does not pile up."""
-    for listing in (LIST_FILE, LARGE_FILE):
+    """Delete old downloads so storage does not pile up.
+
+    Files shown in a-Shell's preview are kept for one more run: a-Shell shows
+    one preview at a time, so the previous one may still be open, and its
+    file must not disappear under it.
+    """
+    for listing in (LIST_FILE, PREVIOUS_FILE):
         if not os.path.exists(listing):
             continue
         try:
@@ -224,13 +232,18 @@ def cleanup_previous(keep_candidates=False):
                     name = os.path.basename(line.strip())
                     if not name or name.startswith("anydl"):
                         continue
-                    folder = VISIBLE_DIR if listing == LARGE_FILE else BASE
+                    folder = VISIBLE_DIR if listing == PREVIOUS_FILE else BASE
                     path = os.path.join(folder, name)
                     if os.path.isfile(path):
                         os.remove(path)
         except OSError:
             pass
-    leftovers = [LIST_FILE, LARGE_FILE, CHOICES_FILE, MESSAGE_FILE, OPEN_FILE, NUMBER_FILE]
+    if os.path.exists(LARGE_FILE):
+        try:
+            os.replace(LARGE_FILE, PREVIOUS_FILE)
+        except OSError:
+            pass
+    leftovers = [LIST_FILE, CHOICES_FILE, MESSAGE_FILE, OPEN_FILE, NUMBER_FILE]
     if not keep_candidates:
         leftovers += [CANDIDATES_FILE, PLAYLIST_FILE]
     for path in leftovers:
@@ -968,7 +981,15 @@ def fxtwitter_media(post_id):
     for source in (post, post.get("quote") or {}):
         media = source.get("media") or {}
         for video in media.get("videos") or []:
-            if video.get("url"):
+            sizes = []
+            for option in (video.get("formats") or video.get("variants") or []):
+                link = option.get("url") or ""
+                m = re.search(r"/(\d+)x(\d+)/", link)
+                if m and ".mp4" in link:
+                    sizes.append((min(int(m.group(1)), int(m.group(2))), link))
+            if sizes:
+                found.append(("video", sizes))
+            elif video.get("url"):
                 found.append(("video", video["url"]))
         for photo in media.get("photos") or []:
             if photo.get("url"):
@@ -978,12 +999,24 @@ def fxtwitter_media(post_id):
     return post, found
 
 
-def try_fxtwitter(url, folder, kinds):
+def pick_size(sizes, quality):
+    """From [(short side, link)], the largest within the quality setting, or
+    else the smallest; the largest of all for Best."""
+    sizes = sorted(sizes)
+    limit = QUALITY_HEIGHTS.get((quality or "").lower())
+    if not limit:
+        return sizes[-1][1]
+    fitting = [s for s in sizes if s[0] <= limit]
+    return (fitting[-1] if fitting else sizes[0])[1]
+
+
+def try_fxtwitter(url, folder, kinds, quality=None):
     post_id = x_status_id(url)
     if not post_id:
         raise Failed("Not an X post.")
     post, media = fxtwitter_media(post_id)
-    items = [link for kind, link in media if kind in kinds][:MAX_ITEMS]
+    items = [link if isinstance(link, str) else pick_size(link, quality)
+             for kind, link in media if kind in kinds][:MAX_ITEMS]
     if not items:
         raise FxAnswer("No %s found in this post." % ("video" if "video" in kinds else "images"))
     author = post.get("author") or {}
@@ -1231,7 +1264,7 @@ def run(mode, url, options=None):
         say("\nTrying FxTwitter...")
         try:
             kinds = ("video",) if mode == "video" else ("image",)
-            return try_fxtwitter(url, new_folder("fxtwitter"), kinds)
+            return try_fxtwitter(url, new_folder("fxtwitter"), kinds, options.get("quality"))
         except Failed as e:
             say("  %s" % e)
             # Show FxTwitter's reason only when it is definite; otherwise

@@ -12,6 +12,7 @@
 #include 'actions/web'
 #include 'actions/text'
 #include 'actions/crypto'
+#include 'actions/documents'
 
 // Keep a blank line after each definition: the compiler swallows the next line otherwise.
 action 'AsheKube.app.a-Shell.ExecuteCommandIntent' aShellRun(text command: 'command', text openWindow: 'openWindow', bool keepGoing: 'keepGoing') {
@@ -92,6 +93,29 @@ if @input contains "anydl-return" {
     }
     quicklook(downloads)
     stop()
+}
+
+/* First run: a welcome page with the setup steps, shown before anything
+   needs a-Shell, so someone without it is told to install it. The flag lives
+   in the Shortcuts folder for the same reason. */
+const welcomeText = "__WELCOME_B64__"
+const welcomeData = base64Decode(welcomeText)
+const welcomePage = setName(welcomeData, "Welcome to AnyDL.html", true)
+const welcomeFlag = getFile("AnyDL/welcome.txt", nil, false)
+@welcomed = "{welcomeFlag}"
+if !@welcomed {
+    quicklook(welcomePage)
+    menu "Ready to start?" {
+        item "I have a-Shell, let's go":
+            const flagText = "Welcome shown. Delete this file to see it again."
+            saveFile("AnyDL/welcome.txt", flagText, true)
+        item "Get a-Shell from the App Store":
+            openURL("https://apps.apple.com/app/a-shell/id1473805438")
+            stop()
+        item "Open the setup guide":
+            openURL("https://github.com/h4sw5q2wr9-byte/AnyDL#set-up")
+            stop()
+    }
 }
 
 /* First half. Saved settings, as key=value lines; a missing file means the
@@ -186,6 +210,8 @@ if @choiceName contains "Settings" {
             item "Check for updates: {@updates}":
                 @onOff = list("On", "Off")
                 @updates = chooseFromList(@onOff, "Check for updates once a day")
+            item "Help & setup guide":
+                quicklook(welcomePage)
             item "Done":
                 @settingsDone = true
         }

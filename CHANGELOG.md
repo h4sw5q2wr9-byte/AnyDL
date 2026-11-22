@@ -9,6 +9,11 @@
   to 100). They are saved in their own folder in the Files app, with a
   button to open it.
 - Leaving Settings returns to the main menu.
+- A welcome page on first run with the setup steps, including a link to get
+  a-Shell; it opens again from Settings › Help & setup guide.
+- X videos from the FxTwitter fallback follow the quality setting too.
+- The previous download is kept one run longer, so an open preview of it
+  never loses its file.
 - The quality setting now works for upright videos (TikTok, Shorts) too:
   "720p" means the short side of the picture. a-Shell shows the resolution
   you got.

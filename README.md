@@ -6,7 +6,7 @@ AnyDL is a shortcut for iPhone and iPad. Share a link to it, pick what you
 want, and it downloads the video, audio, images or file and opens it in Quick
 Look, ready to save to Photos or Files.
 
-[**Download the latest release**](../../releases/latest)
+[**Download the latest release**](../../releases/latest) · [**Set up in 2 minutes**](#set-up)
 
 ## Features
 
@@ -34,22 +34,27 @@ Look, ready to save to Photos or Files.
 - **Better X support.** When X hides a post's video from logged-out
   visitors, AnyDL gets it through [FxTwitter](https://github.com/FxEmbed/FxEmbed).
 
-## Requirements
+## Set up
 
-- iOS or iPadOS 15 or later.
-- [a-Shell](https://apps.apple.com/app/a-shell/id1473805438), the full app.
-  a-Shell mini is not enough.
+It takes about two minutes, once.
 
-## Install
+1. **Install [a-Shell](https://apps.apple.com/app/a-shell/id1473805438)** from
+   the App Store and **open it once**. It must be the full **a-Shell** app;
+   **a-Shell mini** does not work. AnyDL runs its downloader inside it.
+2. **Add AnyDL.** On your iPhone or iPad, open the
+   [latest release](../../releases/latest), tap **AnyDL.shortcut**, and tap
+   **Add Shortcut**. Keep the name **AnyDL**; a-Shell uses it to hand results
+   back.
+3. **Run it once.** A welcome page explains the basics. Tap
+   **I have a-Shell, let's go**.
+4. **Tap "Always Allow" every time you are asked.** The first few runs, iOS
+   asks whether AnyDL may send files to a-Shell, get files from it, and open
+   Shortcuts. "Always Allow" means it never asks again; "Allow Once" means it
+   asks every time, and "Don't Allow" stops AnyDL from working.
+5. **Give the first download a minute or two.** It installs the download
+   tools inside a-Shell. After that, downloads start right away.
 
-1. Install a-Shell from the App Store and open it once.
-2. On your iPhone or iPad, download `AnyDL.shortcut` from the
-   [latest release](../../releases/latest).
-3. Open the file and tap **Add Shortcut**. Keep the name **AnyDL**: a-Shell
-   uses it to hand results back to the shortcut.
-
-The first download installs yt-dlp and gallery-dl inside a-Shell, which takes
-a minute or two. After that it starts immediately.
+Requires iOS or iPadOS 15 or later.
 
 ## Use
 
@@ -131,12 +136,18 @@ files.
 
 | Problem | What to do |
 | --- | --- |
-| The first run is slow | It is installing the downloaders. Leave a-Shell open until it switches back. |
+| An error says an action needs an app that isn't installed | Install the full [a-Shell](https://apps.apple.com/app/a-shell/id1473805438) app (not a-Shell mini) and open it once. |
+| An error asks to open a-Shell | Open a-Shell once, then run AnyDL again. |
+| It keeps asking for permission | Choose **Always Allow** instead of Allow Once. If you chose Don't Allow, open the Shortcuts app, tap **⋯** on AnyDL, then the **ⓘ** button, and under **Privacy** reset AnyDL's permissions. |
+| The first run is slow | It is installing the downloaders. Leave a-Shell open until it is done. |
+| I see an older video, or "the file doesn't exist" | a-Shell shows one preview at a time. Tap **Done** on the old preview; the new download is in Files › On My iPhone › a-Shell › AnyDL. |
+| Every quality setting looks the same | a-Shell shows the resolution you got ("Quality: 720p"). Some videos only come in one or two sizes; AnyDL then takes the closest one. |
 | "The download did not finish" | The downloader stopped unexpectedly. Run it again. |
 | Results never come back to Shortcuts | Make sure the shortcut is still named **AnyDL**. |
 | I closed the preview too early | Find the download in Files › On My iPhone › a-Shell › AnyDL. |
 | An alert with a downloader error | The message comes from yt-dlp or gallery-dl and usually names the cause, such as a login requirement. |
 | A site stopped working | Sites change often. The downloaders update weekly; to force it, run `pip install -U yt-dlp gallery-dl` in a-Shell. |
+| I want to see the welcome page again | Settings › Help & setup guide. |
 
 ## Privacy
 
@@ -160,6 +171,7 @@ compiles to Shortcuts.
 | `AnyDL.shortcut` | The signed shortcut. |
 | `anydl.py` | The downloader that runs in a-Shell. |
 | `AnyDL.cherri.in` | Shortcut source. |
+| `welcome.html` | The first-run welcome page, embedded into the shortcut. |
 | `AnyDL.cherri` | Generated: the source with `anydl.py` and the icons embedded. |
 | `build.py` | Regenerates `AnyDL.cherri`. |
 | `icons/` | Menu icons. |
