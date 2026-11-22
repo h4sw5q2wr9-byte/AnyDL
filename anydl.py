@@ -40,6 +40,7 @@ What each mode tries, after first checking whether the link itself is a file:
 import html
 import importlib
 import json
+import math
 import mimetypes
 import os
 import re
@@ -48,6 +49,7 @@ import site
 import ssl
 import subprocess
 import sys
+import textwrap
 import time
 import urllib.error
 import urllib.parse
@@ -208,6 +210,177 @@ def say(msg=""):
     print(msg, flush=True)
 
 
+# ---------------------------------------------------------------- terminal
+#
+# a-Shell's terminal is narrow on an iPhone (about 40 columns upright), and a
+# line that wraps can no longer be redrawn in place, which made progress
+# jump. Everything here is sized to the terminal width, the screen is
+# cleared at the start, and a short summary closes every run.
+
+NOTES = []          # lines for the summary at the end of the run
+
+
+def width():
+    try:
+        return max(30, min(72, shutil.get_terminal_size((40, 20)).columns))
+    except Exception:
+        return 40
+
+
+def wrap(text, indent="  ", then="  "):
+    for line in textwrap.wrap(text, width() - 1, initial_indent=indent,
+                              subsequent_indent=then) or [indent]:
+        say(line)
+
+
+def rule():
+    say("─" * (width() - 1))
+
+
+def start_screen(title, subtitle=""):
+    """A clean screen for each run, so the terminal never fills up."""
+    sys.stdout.write("\033[2J\033[3J\033[H")
+    sys.stdout.flush()
+    a_shell("hideKeyboard")
+    say("AnyDL %s · %s" % (VERSION, title))
+    if subtitle:
+        say(subtitle[:width() - 1])
+    rule()
+
+
+def note(text):
+    NOTES.append(text)
+
+
+def short_size(size):
+    mb = size / 1e6
+    if mb >= 100:
+        return "%d MB" % round(mb)
+    if mb >= 1:
+        return "%.1f MB" % mb
+    return "%d KB" % max(1, round(size / 1e3))
+
+
+def short_time(seconds):
+    """Remaining time, rounded more coarsely the longer it is, so it does
+    not flicker: 7s, 25s, 1m 10s, 12m."""
+    seconds = max(0, seconds)
+    if seconds < 10:
+        return "%ds" % math.ceil(seconds)
+    if seconds < 60:
+        return "%ds" % (5 * math.ceil(seconds / 5))
+    if seconds < 600:
+        rounded = 10 * math.ceil(seconds / 10)
+        return "%dm %02ds" % divmod(rounded, 60)
+    return "%dm" % math.ceil(seconds / 60)
+
+
+class Progress:
+    """One progress line, redrawn in place.
+
+    The speed is averaged over a few seconds (an exponential moving
+    average), so the remaining time counts down smoothly instead of jumping
+    with every chunk, and a small rise is ignored so it never flickers.
+    """
+
+    def __init__(self, label):
+        self.label = label
+        self.start = self.last = time.time()
+        self.done = 0
+        self.speed = None
+        self.shown_eta = None
+        self.drawn = 0.0
+        self.finished = False
+
+    def update(self, done, total=None):
+        now = time.time()
+        dt = now - self.last
+        if dt >= 0.2 and done >= self.done:
+            rate = (done - self.done) / dt
+            weight = 1 - math.exp(-dt / 3.0)
+            self.speed = rate if self.speed is None else self.speed + weight * (rate - self.speed)
+            self.last, self.done = now, done
+        elif self.done == 0:
+            self.done = done
+        if now - self.drawn < 0.5 and not (total and done >= total):
+            return
+        self.drawn = now
+        self.draw(done, total, now)
+
+    def draw(self, done, total, now):
+        label = "%-5s" % self.label[:5]
+        if total:
+            pct = min(100, int(done * 100 / total))
+            eta = "…"
+            if self.speed and now - self.start > 1.5:
+                seconds = (total - done) / self.speed
+                if self.shown_eta is None or seconds < self.shown_eta or seconds > self.shown_eta * 1.25 + 3:
+                    self.shown_eta = seconds
+                eta = short_time(self.shown_eta)
+            total_text = short_size(total)
+            number, unit = total_text.split()
+            scale = {"MB": 1e6, "KB": 1e3}[unit]
+            done_text = ("%d" if "." not in number else "%.1f") % (done / scale)
+            sizes = "%s/%s" % (done_text.rjust(len(number)), total_text)
+            if not getattr(self, "bar_len", None):
+                # Fixed for the whole download, sized for the longest line,
+                # so the bar does not wobble as the numbers change.
+                longest = len(label) + len(" 100% ") + len(" %s %s" % (sizes, "10m 00s"))
+                self.bar_len = max(4, min(16, width() - 1 - longest))
+            filled = int(self.bar_len * pct / 100)
+            line = "%s %3d%% %s %s %s" % (label, pct, "█" * filled + "░" * (self.bar_len - filled),
+                                          sizes, eta)
+        else:
+            speed = (" · %s/s" % short_size(self.speed)) if self.speed else ""
+            line = "%s %s%s" % (label, short_size(done), speed)
+        line = line[:width() - 1]
+        sys.stdout.write("\r" + line + " " * max(0, width() - 1 - len(line)))
+        sys.stdout.flush()
+
+    def finish(self, done=None, total=None):
+        if self.finished:
+            return
+        self.finished = True
+        done = done or self.done
+        took = time.time() - self.start
+        line = "%-5s %s in %s" % (self.label[:5], short_size(done), short_time(took).replace("~", ""))
+        sys.stdout.write("\r" + line[:width() - 1] + " " * max(0, width() - 1 - len(line)) + "\n")
+        sys.stdout.flush()
+
+
+FRIENDLY_ERRORS = [
+    (r"confirm you.re not a bot", "YouTube thinks this is a bot and wants a sign-in. Wait a while, or "
+                                  "switch between Wi-Fi and mobile data, then try again."),
+    (r"429|too many requests", "The site says there were too many requests. Wait a few minutes, "
+                               "then try again."),
+    (r"confirm your age|age.restricted|inappropriate for some users",
+     "This video is age-restricted and needs a signed-in account, which AnyDL does not have."),
+    (r"private video|this video is private", "This video is private."),
+    (r"members.only|join this channel", "This video is only for the channel's members."),
+    (r"video unavailable|this video is not available|has been removed",
+     "This video is unavailable: removed, private, or blocked in your country."),
+    (r"not available in your country|geo.?restrict", "This video is blocked in your country."),
+    (r"premieres in|live event will begin|is upcoming", "This video has not been released yet."),
+    (r"No video could be found|no video formats found", "No video found in this post or page."),
+    (r"\bDRM\b", "This video is copy-protected (DRM) and cannot be downloaded."),
+    (r"HTTP Error 403|Forbidden", "The site refused the download. Try again; if it keeps happening "
+                                  "the site may have changed, and AnyDL updates its tools weekly."),
+    (r"HTTP Error 404|not found", "The link leads nowhere (not found). Check that it is complete."),
+    (r"No space left|Errno 28", "Your iPhone is out of storage."),
+    (r"Unable to download webpage|timed out|Network is unreachable|Name or service not known|"
+     r"nodename nor servname|Connection (refused|reset)", "Could not reach the site. Check your "
+                                                          "internet connection and try again."),
+]
+
+
+def friendly_error(text):
+    """A short explanation for common failures; otherwise the error itself."""
+    for pattern, message in FRIENDLY_ERRORS:
+        if re.search(pattern, text or "", re.I):
+            return message
+    return text
+
+
 def write_status(text):
     with open(STATUS_FILE, "w", encoding="utf-8") as f:
         f.write(text)
@@ -223,8 +396,13 @@ def finish(files=None, error=None):
     """
     shutil.rmtree(TMP, ignore_errors=True)
     if not files:
-        status = re.sub(r"\s+", " ", error or "Nothing was downloaded.").strip()[:400]
-        say("\nFailed: " + status)
+        detail = re.sub(r"\s+", " ", error or "Nothing was downloaded.").strip()[:400]
+        status = friendly_error(detail)
+        say()
+        rule()
+        wrap("✗ " + status, indent="", then="  ")
+        if status != detail:
+            wrap(detail)
         write_status(status)
         write_library_summary()
         back_to_shortcuts()
@@ -233,26 +411,22 @@ def finish(files=None, error=None):
     after = (OPTIONS.get("after") or "").lower()
     large = any(os.path.getsize(p) > LARGE_BYTES for p in files)
     media_only = all(kind_of(p) in ("video", "image") for p in files)
-    plural = "" if len(files) == 1 else "s"
-
     if after.startswith("save to photos"):
         if media_only and not large:
             saved = [to_library(p, keep_original=True) for p in files]
             write_list(files)
             write_status("PHOTOS")
-            finish_run(saved, "\nDone: %d file%s. Saving to Photos..." % (len(files), plural))
+            finish_run(saved, "Saving to Photos…")
             back_to_shortcuts()
             sys.exit(0)
-        say("\nThis download cannot go to Photos automatically (%s), so it opens here;"
-            % ("too large" if large else "not a photo or video"))
-        say("use the share button to save it.")
+        note("Not saved to Photos automatically (%s): use the share button in the preview."
+             % ("over 50 MB" if large else "not a photo or video"))
 
     if after.startswith("keep in files"):
         saved = [to_library(p) for p in files]
         write_status("FILES")
         folder = os.path.dirname(saved[0])
-        finish_run(saved, "\nDone: %d file%s, saved in Files > On My iPhone > a-Shell > AnyDL > %s."
-                   % (len(saved), plural, os.path.relpath(folder, VISIBLE_DIR)))
+        finish_run(saved, "Opening the folder in Files…")
         global _handed_off
         _handed_off = True
         a_shell("open " + files_link(folder))
@@ -261,17 +435,15 @@ def finish(files=None, error=None):
     if len(files) == 1 or large:
         shown = [to_library(p) for p in files]
         write_status("VIEW")
-        finish_run(shown, "\nDone: %d file%s, saved in Files > On My iPhone > a-Shell > AnyDL."
-                   % (len(shown), plural))
-        say("If you still see an earlier download, tap Done on it: a-Shell shows")
-        say("one preview at a time. This one is in the AnyDL folder in Files.")
+        finish_run(shown, "Opening the preview. If an older one is still open, tap Done on "
+                          "it: a-Shell shows one preview at a time.")
         show_in_ashell(max(shown, key=os.path.getsize))
         sys.exit(0)
 
     saved = [to_library(p, keep_original=True) for p in files]
     write_list(files)
     write_status("OK")
-    finish_run(saved, "\nDone: %d files." % len(files))
+    finish_run(saved, "Showing them in Shortcuts…")
     back_to_shortcuts()
     sys.exit(0)
 
@@ -281,8 +453,17 @@ def write_list(files):
         f.write("\n".join(os.path.basename(p) for p in files))
 
 
-def finish_run(saved, message):
-    say(message)
+def finish_run(saved, next_step):
+    """The summary at the end of a successful run, then the bookkeeping."""
+    total = sum(os.path.getsize(p) for p in saved if os.path.exists(p))
+    folder = os.path.relpath(os.path.dirname(saved[0]), VISIBLE_DIR)
+    say()
+    rule()
+    say("✓ %s · %s" % ("1 file" if len(saved) == 1 else "%d files" % len(saved), short_size(total)))
+    for line in NOTES:
+        wrap(line)
+    wrap("In Files › a-Shell › AnyDL › %s" % folder)
+    wrap(next_step)
     title = os.path.splitext(os.path.basename(saved[0]))[0]
     title = re.sub(r" \(\d+\)$", "", title)       # copy number, not part of the name
     if len(saved) > 1:
@@ -613,7 +794,7 @@ def name_from_response(resp, url):
 def save_stream(resp, dest):
     total = int(resp.headers.get("Content-Length") or 0)
     done = 0
-    last = 0.0
+    bar = Progress(kind_of(dest).replace("image", "photo").capitalize())
     with open(dest, "wb") as f:
         while True:
             chunk = resp.read(256 * 1024)
@@ -621,15 +802,8 @@ def save_stream(resp, dest):
                 break
             f.write(chunk)
             done += len(chunk)
-            now = time.time()
-            if now - last > 0.7:
-                last = now
-                if total:
-                    sys.stdout.write("\r  %.1f / %.1f MB (%d%%)   " % (done / 1e6, total / 1e6, done * 100 // total))
-                else:
-                    sys.stdout.write("\r  %.1f MB   " % (done / 1e6))
-                sys.stdout.flush()
-    sys.stdout.write("\r  %.1f MB downloaded.        \n" % (done / 1e6))
+            bar.update(done, total or None)
+    bar.finish(done)
     if total and done < total:
         raise Failed("The download stopped early (%d of %d bytes)." % (done, total))
     if done == 0:
@@ -637,12 +811,13 @@ def save_stream(resp, dest):
     return dest
 
 
-def direct_download(url, folder, resp=None, referer=None):
+def direct_download(url, folder, resp=None, referer=None, show_name=True):
     if resp is None:
         resp = open_url(url, referer=referer)
     with resp:
         name = name_from_response(resp, url)
-        say("Downloading " + name)
+        if show_name:
+            say(name[:width() - 1])
         return save_stream(resp, os.path.join(folder, name))
 
 
@@ -708,7 +883,7 @@ def ensure(module, package, extras=()):
         return importlib.import_module(module)
     except ImportError:
         pass
-    say("First run: installing %s (this can take a minute)..." % package)
+    say("First time: installing %s. This can take a minute…" % package)
     if not _pip([package]):
         raise Failed("Could not install %s. Check the internet connection." % package)
     for extra in extras:
@@ -742,7 +917,7 @@ def weekly_update():
         return
     if time.time() - last < UPDATE_EVERY:
         return
-    say("Updating downloaders...")
+    say("Updating the download tools (weekly)…")
     _pip(["--upgrade", "yt-dlp", "gallery-dl"])
     _stamp()
 
@@ -934,6 +1109,7 @@ def clean_error(text):
     text = re.split(r"\s*\(caused by ", text)[0]
     # Drop yt-dlp's command-line advice; it means nothing in an iPhone alert.
     text = re.split(r"\s+(?:This helps protect our community\.\s*)?Use --cookies|\s+See https://github\.com/yt-dlp", text)[0]
+    text = re.sub(r"^\[[\w:.-]+\]\s*(?:[\w.-]+:\s+)?", "", text.strip())   # "[twitter] 123: "
     text = text.strip()
     if re.search(r"NSFW|authenticat|log ?in|sign in|cookies|age.restricted|private", text, re.I):
         text += " (This post needs a logged-in account, and AnyDL has no login.)"
@@ -945,7 +1121,86 @@ def looks_unmerged(files):
     return any(re.search(r"\.f[\w-]+\.\w+$", os.path.basename(p)) for p in files)
 
 
+CODEC_NAMES = {"avc1": "H.264", "avc3": "H.264", "h264": "H.264", "hev1": "HEVC", "hvc1": "HEVC",
+               "h265": "HEVC", "hevc": "HEVC", "vp9": "VP9", "vp09": "VP9", "av01": "AV1"}
 SUBTITLE_EXT = {"vtt", "srt", "ass", "ttml", "srv1", "srv2", "srv3", "json3", "lrc"}
+
+STEP_MESSAGES = {
+    "Merger": "Joining video and sound…",
+    "EmbedSubtitle": "Adding subtitles…",
+    "ExtractAudio": "Converting to MP3…",
+    "EmbedThumbnail": "Adding the cover image…",
+}
+
+
+class QuietLog:
+    """yt-dlp's messages, kept out of the terminal; AnyDL shows its own."""
+
+    def __init__(self):
+        self.warnings = []
+        self.errors = []
+
+    def debug(self, msg):
+        pass
+
+    info = debug
+
+    def warning(self, msg):
+        self.warnings.append(msg)
+
+    def error(self, msg):
+        self.errors.append(msg)
+
+
+def ytdlp_hooks(audio):
+    """Progress and step hooks that draw AnyDL's own progress lines."""
+    bars = {}
+    seen = {"title": None, "steps": set()}
+
+    def show_title(info):
+        title = info.get("title")
+        index = info.get("playlist_index")
+        key = (title, index)
+        if title and key != seen["title"]:
+            seen["title"] = key
+            count = info.get("n_entries") or info.get("playlist_count")
+            prefix = ("%s/%s " % (index, count)) if index and count else ""
+            say((prefix + nice_title(title, ""))[:width() - 1] or prefix.strip())
+
+    def before_download(info, incomplete=False):
+        # yt-dlp asks this before each video, so the title comes first.
+        if not incomplete:
+            show_title(info)
+        return None
+
+    def progress(d):
+        info = d.get("info_dict") or {}
+        show_title(info)
+        name = d.get("filename") or d.get("tmpfilename") or ""
+        if ext_of(name) in SUBTITLE_EXT:
+            label = "Subs"
+        elif info.get("vcodec") == "none":
+            label = "Sound" if not audio else "Audio"
+        elif info.get("acodec") == "none":
+            label = "Video"
+        else:
+            label = "Audio" if audio else "Video"
+        bar = bars.get(name)
+        if bar is None:
+            bar = bars[name] = Progress(label)
+        total = d.get("total_bytes") or d.get("total_bytes_estimate")
+        if d.get("status") == "downloading":
+            bar.update(d.get("downloaded_bytes") or 0, total)
+        elif d.get("status") == "finished":
+            bar.finish(d.get("downloaded_bytes") or d.get("total_bytes") or bar.done)
+
+    def step(d):
+        message = STEP_MESSAGES.get(d.get("postprocessor"))
+        if d.get("status") == "started" and message and message not in seen["steps"]:
+            seen["steps"].add(message)
+            say(message)
+
+    return progress, step, before_download
 
 
 def try_ytdlp(url, folder, audio=False, referer=None, options=None, playlist=0):
@@ -959,15 +1214,15 @@ def try_ytdlp(url, folder, audio=False, referer=None, options=None, playlist=0):
         # Without ffmpeg, separate video and sound streams cannot be joined,
         # which limits some sites (YouTube above 360p) to lower quality.
         formats = [f for f in formats if not f[1]] or formats
-        say("Note: ffmpeg is not available, so some videos come in lower quality.")
+        note("ffmpeg is not available, so this may be lower quality than you chose.")
     mp3 = audio and (options.get("audio") or "").lower() == "mp3"
     if mp3 and not ffmpeg:
-        say("Note: ffmpeg is not available, so audio keeps its original format.")
+        note("ffmpeg is not available, so the audio kept its original format.")
         mp3 = False
     language = SUBTITLE_LANGUAGES.get((options.get("subtitles") or "").lower())
     subtitles = bool(language) and not audio
     if subtitles and not ffmpeg:
-        say("Note: ffmpeg is not available, so subtitles cannot be added.")
+        note("Subtitles: ffmpeg is not available, so they could not be added.")
         subtitles = False
     outtmpl = os.path.join(folder, NAME_TEMPLATE)
     error = None
@@ -978,27 +1233,36 @@ def try_ytdlp(url, folder, audio=False, referer=None, options=None, playlist=0):
         fmt, merge, cover = attempts[i]
         empty(folder)
         if yt_dlp is None:
-            args = ["-f", fmt, "-o", outtmpl, "--no-warnings", "--windows-filenames"]
+            args = ["-f", fmt, "-o", outtmpl, "--no-warnings", "--windows-filenames",
+                    "--concurrent-fragments", "4"]
             args += (["--yes-playlist", "--playlist-end", str(playlist), "--ignore-errors"]
                      if playlist else ["--no-playlist"])
             if merge:
                 args += ["--merge-output-format", merge]
             if subtitles:
                 args += ["--write-subs", "--write-auto-subs", "--sub-langs",
-                         "%s,%s-.*" % (language, language), "--embed-subs"]
+                         "%s(-(?!orig).*)?" % language, "--embed-subs"]
             if referer:
                 args += ["--referer", referer]
             py = sys.executable or "python3"
             if not _run_tool(["yt-dlp", [py, "-m", "yt_dlp"]], args + [url]):
                 error = "yt-dlp could not download this link."
         else:
+            log = QuietLog()
+            progress_hook, step_hook, title_hook = ytdlp_hooks(audio)
             opts = {
                 "format": fmt,
                 "outtmpl": outtmpl,
                 "noplaylist": not playlist,
-                "no_warnings": True,
+                "quiet": True,
+                "noprogress": True,
+                "logger": log,
+                "progress_hooks": [progress_hook],
+                "postprocessor_hooks": [step_hook],
+                "match_filter": title_hook,
                 "retries": 3,
                 "fragment_retries": 5,
+                "concurrent_fragment_downloads": 4,
                 "windowsfilenames": True,
                 "postprocessors": [],
             }
@@ -1011,8 +1275,12 @@ def try_ytdlp(url, folder, audio=False, referer=None, options=None, playlist=0):
                 opts["postprocessors"] += mp3_postprocessors(cover)
                 opts["writethumbnail"] = cover
             if subtitles:
+                # "en" and regional variants ("en-GB"), but not YouTube's raw
+                # "en-orig", which would add the same subtitles twice. The
+                # track is marked as the default one for Apple's players.
                 opts.update(writesubtitles=True, writeautomaticsub=True,
-                            subtitleslangs=[language, language + "-.*"])
+                            subtitleslangs=["%s(-(?!orig).*)?" % language],
+                            postprocessor_args={"embedsubtitle": ["-disposition:s:0", "default"]})
                 opts["postprocessors"].append(
                     {"key": "FFmpegEmbedSubtitle", "already_have_subtitle": False})
             if referer:
@@ -1022,17 +1290,27 @@ def try_ytdlp(url, folder, audio=False, referer=None, options=None, playlist=0):
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     info = ydl.extract_info(url) or {}
                 if not audio and not playlist and info.get("width") and info.get("height"):
-                    fps = (" %d fps" % round(info["fps"])) if info.get("fps") else ""
-                    say("Quality: %dp%s (%sx%s, %s)" % (
-                        min(info["width"], info["height"]), fps, info["width"], info["height"],
-                        (info.get("vcodec") or "?").split(".")[0]))
-                if subtitles and not info.get("requested_subtitles") and not playlist:
-                    say("Note: this video has no %s subtitles." % options.get("subtitles"))
+                    fps = (" · %d fps" % round(info["fps"])) if info.get("fps") else ""
+                    codec = CODEC_NAMES.get((info.get("vcodec") or "").split(".")[0], "")
+                    note("%dp%s%s" % (min(info["width"], info["height"]), fps,
+                                      (" · " + codec) if codec else ""))
+                if subtitles and not playlist:
+                    wanted = options.get("subtitles")
+                    if info.get("requested_subtitles"):
+                        note("Subtitles: %s added. Turn them on with the captions button "
+                             "while the video plays." % wanted)
+                    else:
+                        note("Subtitles: this video has no %s subtitles%s. Tip: iOS 27 can "
+                             "make its own; tap the captions button while it plays." % (
+                                 wanted, " that YouTube lets downloaders get"
+                                 if "youtube" in (info.get("extractor") or "").lower() else ""))
             except Exception as e:
                 error = clean_error(e)
                 if subtitles and "subtitle" in error.lower():
                     # Subtitles are a bonus; never let them stop the download.
-                    say("Note: the subtitles could not be downloaded; trying without them.")
+                    say("The subtitles failed; downloading without them.")
+                    note("Subtitles: %s could not be downloaded (%s)." % (
+                        options.get("subtitles"), friendly_error(error).rstrip(".")))
                     subtitles = False
                     continue
                 if "Unsupported URL" in error or "DRM" in error or "No video could be found" in error:
@@ -1138,7 +1416,7 @@ def run_playlist(lines):
     most = job.get("most") or PLAYLIST_LIMIT
     amount = max(1, min(int(m.group(1)), most, PLAYLIST_LIMIT))
     title = nice_title(job.get("title") or "") or "Playlist"
-    say("Downloading %d from %s" % (amount, title))
+    say("%d from %s" % (amount, title))
     files = try_ytdlp(job["url"], new_folder("playlist"), audio=(job.get("mode") == "audio"),
                       options=job.get("options"), playlist=amount)
     folder = os.path.join(VISIBLE_DIR, PLAYLISTS_FOLDER, safe_name(title, "Playlist"))
@@ -1226,7 +1504,7 @@ def try_gallerydl(url, folder):
     config.set(("extractor",), "base-directory", folder)
     config.set(("extractor",), "directory", [])
     config.set(("extractor",), "image-range", "1-%d" % MAX_ITEMS)
-    config.set(("output",), "mode", "terminal")
+    config.set(("output",), "mode", "null")       # AnyDL shows its own summary
     try:
         job.DownloadJob(url).run()
     except exception.NoExtractorError:
@@ -1326,9 +1604,15 @@ def try_fxtwitter(url, folder, kinds, quality=None):
     author = post.get("author") or {}
     base = media_name(author.get("name") or author.get("screen_name") or "",
                       post.get("text") or "", "Twitter", post.get("id") or post_id)
+    say(base[:width() - 1])
+    for link in items:
+        m = re.search(r"/(\d+)x(\d+)/", link)
+        if m:
+            note("%dp · H.264" % min(int(m.group(1)), int(m.group(2))))
+            break
     files = []
     for n, link in enumerate(items, 1):
-        path = direct_download(link, folder)
+        path = direct_download(link, folder, show_name=False)
         ext = os.path.splitext(path)[1] or ".mp4"
         name = base if len(items) == 1 else "%s %d" % (base, n)
         target = os.path.join(folder, name + ext)
@@ -1549,40 +1833,40 @@ def run(mode, url, options=None):
 
     tool_error = None
     if mode in ("video", "audio") and is_playlist_link(url):
-        say("\nThis is a playlist.")
+        say("This is a playlist. Counting…")
         ask_playlist_count(mode, url, options)
     if mode in ("video", "audio"):
-        say("\nTrying yt-dlp...")
+        say("Looking up the %s…" % ("audio" if mode == "audio" else "video"))
         try:
             return try_ytdlp(url, new_folder("ytdlp"), audio=(mode == "audio"), options=options)
         except Failed as e:
             tool_error = str(e)
-            say("  %s" % e)
+            wrap(friendly_error(str(e)))
     elif mode == "gallery":
-        say("\nTrying gallery-dl...")
+        say("Looking up the images…")
         try:
             return try_gallerydl(url, new_folder("gallery"))
         except Failed as e:
             tool_error = str(e)
-            say("  %s" % e)
+            wrap(friendly_error(str(e)))
 
     if mode in ("video", "gallery") and x_status_id(url):
-        say("\nTrying FxTwitter...")
+        say("Trying another way (FxTwitter)…")
         try:
             kinds = ("video",) if mode == "video" else ("image",)
             return try_fxtwitter(url, new_folder("fxtwitter"), kinds, options.get("quality"))
         except Failed as e:
-            say("  %s" % e)
+            wrap(friendly_error(str(e)))
             # Show FxTwitter's reason only when it is definite; otherwise
             # the downloader's own error says more.
             if isinstance(e, FxAnswer) or not tool_error:
                 tool_error = str(e)
 
-    say("\nLooking through the page...")
+    say("Looking through the page…")
     try:
         return scan_page(page_url, page, mode)
     except Failed as e:
-        say("  %s" % e)
+        wrap(friendly_error(str(e)))
         if tool_error and "Unsupported URL" not in tool_error:
             raise Failed(tool_error)
         if page is None and probe_error:
@@ -1599,12 +1883,19 @@ def main():
     mode, args, options = read_job()
     OPTIONS = options
     cleanup_previous(keep_candidates=(mode in ("pick", "playlist")))
-    say("AnyDL %s" % VERSION)
+    titles = {"video": "Video", "audio": "Audio", "gallery": "Gallery", "file": "File",
+              "pick": "Your picks", "playlist": "Playlist", "again": "Download again",
+              "clear": "Clear downloads"}
+    host = ""
+    if args and mode in MODES:
+        host = (urllib.parse.urlsplit(args[0]).hostname or "").replace("www.", "")
+    start_screen(titles.get(mode, "Download"), host)
     migrate_library()
     try:
         if mode == "clear":
             clear_library(" ".join(args))
             write_status("CLEARED")
+            rule()
             write_library_summary()
             back_to_shortcuts()
             sys.exit(0)
@@ -1614,34 +1905,36 @@ def main():
             mode, args = entry.get("mode") or "video", [entry["url"]]
             if mode not in MODES:
                 mode = "video"
-            say("Downloading again: %s" % entry.get("title", ""))
+            say(entry.get("title", "")[:width() - 1])
         if mode == "pick":
             files = publish(run_pick(args))
         elif mode == "playlist":
             run_playlist(args)
             shutil.rmtree(TMP, ignore_errors=True)
             write_status("SAVED")
-            say("\nDone.")
+            say()
+            rule()
+            with open(MESSAGE_FILE, encoding="utf-8") as f:
+                wrap("✓ " + f.read(), indent="", then="  ")
             back_to_shortcuts()
             sys.exit(0)
         else:
             if not args:
                 finish(error="No link was given.")
             JOB.update(url=args[0], mode=mode)
-            say("%s: %s" % (mode, args[0]))
             check_for_update(options)
             weekly_update()
             files = publish(run(mode, args[0], options))
     except NeedPick:
         shutil.rmtree(TMP, ignore_errors=True)
         write_status("PICK")
-        say("\nSeveral items found - choose in the shortcut.")
+        say("Several items found: choose in Shortcuts.")
         back_to_shortcuts()
         sys.exit(0)
     except NeedPlaylistCount:
         shutil.rmtree(TMP, ignore_errors=True)
         write_status("PLAYLIST")
-        say("\nChoose how many in the shortcut.")
+        say("Choose how many in Shortcuts.")
         back_to_shortcuts()
         sys.exit(0)
     except Failed as e:

@@ -25,6 +25,14 @@ changes are included here.)
   100, into their own folder.
 - **Update check**: once a day, and on demand from Settings.
 - A welcome page on first run with the setup steps and a link to a-Shell.
+- **A tidy a-Shell screen**: it is cleared at the start of each download,
+  shows short steps and one progress line per stream with a smooth
+  countdown, and ends with a summary: size, resolution, frame rate, codec,
+  whether subtitles were added, and where the file is.
+- **Clear error messages** for common problems (YouTube bot check, private,
+  age-restricted, unavailable or blocked videos, too many requests, no
+  connection, no storage), with the technical detail underneath.
+- Streaming sites download four pieces at a time.
 
 **Fixed**
 
@@ -32,6 +40,8 @@ changes are included here.)
   for X videos from the FxTwitter fallback.
 - Leaving Settings returns to the main menu.
 - Subtitles that fail to download no longer stop the video.
+- Subtitles are marked as the default track and no longer added twice for
+  YouTube ("en" and "en-orig").
 
 ## 2.8 (not released)
 

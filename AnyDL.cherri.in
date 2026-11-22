@@ -457,7 +457,7 @@ repeat round for 30 {
                 }
                 if @setting == "Subtitles" {
                     @languages = list("Off", "English", "Dutch", "German", "French", "Spanish", "Portuguese", "Italian", "Polish", "Turkish", "Arabic", "Hindi", "Indonesian", "Japanese", "Korean", "Chinese")
-                    @subtitles = chooseFromList(@languages, "Subtitles built into downloaded videos, when the video has them. Turn them on in the player.")
+                    @subtitles = chooseFromList(@languages, "Subtitles built into downloaded videos. While a video plays, turn them on with the captions button. YouTube sometimes keeps them from downloaders; a-Shell says after each download whether they were added.")
                 }
                 if @setting == "After download" {
                     @afterModes = list("Preview", "Save to Photos", "Keep in Files")

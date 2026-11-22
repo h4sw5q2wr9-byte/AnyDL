@@ -190,6 +190,7 @@ files.
 | It keeps asking for permission | Choose **Always Allow** instead of Allow Once. If you chose Don't Allow, open the Shortcuts app, tap **⋯** on AnyDL, then the **ⓘ** button, and under **Privacy** reset AnyDL's permissions. |
 | The first run is slow | It is installing the downloaders. Leave a-Shell open until it is done. |
 | I see an older video, or "the file doesn't exist" | a-Shell shows one preview at a time. Tap **Done** on the old preview; the new download is in Files › On My iPhone › a-Shell › AnyDL. |
+| Subtitles do not show | While the video plays, tap the captions button and choose the language. a-Shell's summary says whether they were added; YouTube sometimes keeps subtitles from downloaders. iOS 27 can also make its own subtitles from the same button. |
 | Every quality setting looks the same | a-Shell shows the resolution you got ("Quality: 720p"). Some videos only come in one or two sizes; AnyDL then takes the closest one. |
 | "The download did not finish" | The downloader stopped unexpectedly. Run it again. |
 | Results never come back to Shortcuts | Make sure the shortcut is still named **AnyDL**. |
