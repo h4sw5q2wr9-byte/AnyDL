@@ -17,7 +17,7 @@ def b64(path):
 
 source = (here / "AnyDL.cherri.in").read_text()
 source = source.replace("__SCRIPT_B64__", b64("anydl.py"))
-for name in ("video", "audio", "gallery", "file"):
+for name in ("video", "audio", "gallery", "file", "settings"):
     source = source.replace("__ICON_%s__" % name.upper(), b64("icons/%s.png" % name))
 (here / "AnyDL.cherri").write_text(source)
 print("Wrote AnyDL.cherri (%d bytes)" % len(source))

@@ -7,6 +7,7 @@ const icons = [
   ['audio', 'volume-2', '#4B69D9'],
   ['gallery', 'image', '#E8914F'],
   ['file', 'file-text', '#55A072'],
+  ['settings', 'settings', '#8E8E93'],
 ];
 (async () => {
   const b = await chromium.launch();

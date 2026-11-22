@@ -30,8 +30,8 @@ action 'AsheKube.app.a-Shell.GetFileIntent' aShellGet(text fileName: 'fileName',
    left running in the background:
    - Started normally, it asks what to download, starts a-Shell, and ends.
    - a-Shell shows a single download in its own preview. Only when there is
-     something to show here (a choice, an error, several files) does the
-     script start AnyDL again, with the text anydl-return as input. */
+     something to show here (a choice, a summary, an error, several files)
+     does the script start AnyDL again, with the text anydl-return as input. */
 
 /* Second half: results from a-Shell. */
 @input = "{ShortcutInput}"
@@ -50,6 +50,31 @@ if @input contains "anydl-return" {
         aShellRun("cd $SHORTCUTS\npython anydl.py", "open", false)
         stop()
     }
+    if @status == "PLAYLIST" {
+        /* A playlist, channel or profile: ask how many, then download. */
+        const askFile = aShellGet("anydl_message.txt", true, true)
+        const amountsFile = aShellGet("anydl_choices.txt", true, true)
+        const amounts = splitText("{amountsFile}", "\n")
+        const amount = chooseFromList(amounts, "{askFile}")
+        const amountText = "playlist\n{amount}"
+        const amountFile = setName(amountText, "anydl_job.txt", true)
+        aShellPut(amountFile, true)
+        aShellRun("cd $SHORTCUTS\npython anydl.py", "open", false)
+        stop()
+    }
+    if @status == "SAVED" {
+        /* A playlist was saved to a folder in the Files app. */
+        const savedFile = aShellGet("anydl_message.txt", true, true)
+        const folderFile = aShellGet("anydl_open.txt", true, true)
+        @folderLink = "{folderFile}"
+        menu "{savedFile}" {
+            item "Open in Files":
+                openURL(@folderLink)
+            item "Done":
+                nothing()
+        }
+        stop()
+    }
     if @status != "OK" {
         alert("{@status}", "AnyDL")
         stop()
@@ -64,30 +89,105 @@ if @input contains "anydl-return" {
     stop()
 }
 
-/* First half. 1. Work out which link to download: shared item, else
-   clipboard, else ask. */
-const found = getURLs("{ShortcutInput}")
-@link = getFirstItem(found)
-if !@link {
-    @link = prompt("Paste the link to download", "URL")
+/* First half. Saved settings, as key=value lines; a missing file means the
+   defaults. The downloader reads them too. */
+const settingsFile = aShellGet("anydl_settings.txt", false, true)
+@settings = "{settingsFile}"
+
+/* A newer version found by the downloader's daily check, offered once. */
+const updateFile = aShellGet("anydl_update.txt", false, true)
+@update = "{updateFile}"
+if @update contains "." {
+    const seenText = "seen"
+    const seenFile = setName(seenText, "anydl_update.txt", true)
+    aShellPut(seenFile, true)
+    menu "AnyDL {@update} is available" {
+        item "Update now":
+            openURL("https://github.com/h4sw5q2wr9-byte/AnyDL/releases/latest")
+            stop()
+        item "Later":
+            nothing()
+    }
 }
 
-/* 2. Main menu: what kind of thing to download. */
+/* 1. The link to download: the shared item, else the clipboard. If there is
+      none, the link is asked for after the menu, so Settings needs none. */
+const found = getURLs("{ShortcutInput}")
+@link = getFirstItem(found)
+@heading = "AnyDL"
+if @link {
+    const site = getURLDetail("{@link}", "Host")
+    @heading = "Download from {site}"
+}
+
+/* 2. Main menu. */
 const iconVideo = "__ICON_VIDEO__"
 const iconAudio = "__ICON_AUDIO__"
 const iconGallery = "__ICON_GALLERY__"
 const iconFile = "__ICON_FILE__"
+const iconSettings = "__ICON_SETTINGS__"
 @items: array
 @items += makeVCard("Download Video", "Videos, GIFs and clips", iconVideo)
 @items += makeVCard("Download Audio", "Music, or the sound of a video", iconAudio)
 @items += makeVCard("Download Gallery", "Images, albums and photo posts", iconGallery)
 @items += makeVCard("Download File", "Documents, archives, anything linked", iconFile)
+@items += makeVCard("Settings", "Video quality, audio format, updates", iconSettings)
 @menuText = "{@items}"
 @menuFile = setName(@menuText, "menu.vcf", true)
 @menuCards = @menuFile.contact
-const site = getURLDetail("{@link}", "Host")
-@choice = chooseFromList(@menuCards, "Download from {site}")
+@choice = chooseFromList(@menuCards, @heading)
 @choiceName = "{@choice}"
+
+/* Settings: change one at a time until Done. Values are stored as shown. */
+if @choiceName contains "Settings" {
+    @quality = "Best"
+    if @settings contains "quality=1080p" {
+        @quality = "1080p"
+    }
+    if @settings contains "quality=720p" {
+        @quality = "720p"
+    }
+    if @settings contains "quality=480p" {
+        @quality = "480p"
+    }
+    if @settings contains "quality=Data saver" {
+        @quality = "Data saver"
+    }
+    if @settings contains "quality=Ask each time" {
+        @quality = "Ask each time"
+    }
+    @audio = "Original"
+    if @settings contains "audio=MP3" {
+        @audio = "MP3"
+    }
+    @updates = "On"
+    if @settings contains "updates=Off" {
+        @updates = "Off"
+    }
+    repeat i for 20 {
+        menu "Settings" {
+            item "Video quality: {@quality}":
+                @qualities = list("Best", "1080p", "720p", "480p", "Data saver", "Ask each time")
+                @quality = chooseFromList(@qualities, "Video quality")
+            item "Audio format: {@audio}":
+                @formats = list("Original", "MP3")
+                @audio = chooseFromList(@formats, "Audio format (MP3 adds the cover image)")
+            item "Check for updates: {@updates}":
+                @onOff = list("On", "Off")
+                @updates = chooseFromList(@onOff, "Check for updates once a day")
+            item "Done":
+                stop()
+        }
+        const newSettings = "quality={@quality}\naudio={@audio}\nupdates={@updates}"
+        const newSettingsFile = setName(newSettings, "anydl_settings.txt", true)
+        aShellPut(newSettingsFile, true)
+    }
+    stop()
+}
+
+if !@link {
+    @link = prompt("Paste the link to download", "URL")
+}
 @mode = "video"
 if @choiceName contains "Audio" {
     @mode = "audio"
@@ -99,12 +199,22 @@ if @choiceName contains "File" {
     @mode = "file"
 }
 
+/* Video quality for this download, when the setting says to ask. */
+@extra = ""
+if @mode == "video" {
+    if @settings contains "quality=Ask each time" {
+        @askQualities = list("Best", "1080p", "720p", "480p", "Data saver")
+        @pickedQuality = chooseFromList(@askQualities, "Video quality")
+        @extra = "quality={@pickedQuality}"
+    }
+}
+
 /* 3. Hand the downloader script and the job to a-Shell. */
 const scriptText = "__SCRIPT_B64__"
 const scriptData = base64Decode(scriptText)
 const scriptFile = setName(scriptData, "anydl.py", true)
 aShellPut(scriptFile, true)
-const jobText = "{@mode}\n{@link}"
+const jobText = "{@mode}\n{@link}\n{@settings}\n{@extra}"
 const jobFile = setName(jobText, "anydl_job.txt", true)
 aShellPut(jobFile, true)
 

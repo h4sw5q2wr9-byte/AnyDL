@@ -4,11 +4,18 @@
 Runs inside a-Shell on iOS, started by the AnyDL shortcut. The shortcut writes
 anydl_job.txt, runs this script, and reads the result back:
 
-    anydl_job.txt      line 1: mode (video | audio | gallery | file | pick)
-                       then the link, or for "pick" the chosen list entries
-    anydl_status.txt   "OK", "PICK", "VIEW", or a one-line error message
+    anydl_job.txt      line 1: mode (video | audio | gallery | file | pick |
+                       playlist), then the link, or for "pick" the chosen list
+                       entries, or for "playlist" the chosen amount. Lines of
+                       the form key=value are settings (see read_job).
+    anydl_settings.txt the shortcut's saved settings, as key=value lines
+    anydl_status.txt   "OK", "PICK", "PLAYLIST", "SAVED", "VIEW", or a
+                       one-line error message
+    anydl_message.txt  when PLAYLIST or SAVED: the text for the shortcut to show
+    anydl_open.txt     when SAVED: a link that opens the folder in Files
+    anydl_update.txt   a newer AnyDL version, once (see check_for_update)
     anydl_files.txt    when OK: one downloaded file name per line
-    anydl_choices.txt  when PICK: one entry per line for the shortcut to list
+    anydl_choices.txt  when PICK or PLAYLIST: one entry per line to choose from
     anydl_large.txt    when VIEW: full paths of the files saved for the preview
 
 The shortcut does not wait for this script. When there is something for it
@@ -39,7 +46,7 @@ import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
 
-VERSION = "2.7"
+VERSION = "2.8"
 
 BASE = os.environ.get("ANYDL_DIR") or os.environ.get("SHORTCUTS") or os.getcwd()
 TMP = os.path.join(BASE, "anydl_tmp")
@@ -49,6 +56,11 @@ LIST_FILE = os.path.join(BASE, "anydl_files.txt")
 LARGE_FILE = os.path.join(BASE, "anydl_large.txt")
 CHOICES_FILE = os.path.join(BASE, "anydl_choices.txt")
 CANDIDATES_FILE = os.path.join(BASE, "anydl_candidates.json")
+PLAYLIST_FILE = os.path.join(BASE, "anydl_playlist.json")
+MESSAGE_FILE = os.path.join(BASE, "anydl_message.txt")
+OPEN_FILE = os.path.join(BASE, "anydl_open.txt")
+UPDATE_FILE = os.path.join(BASE, "anydl_update.txt")
+UPDATE_STATE_FILE = os.path.join(BASE, "anydl_update_state.json")
 STAMP_FILE = os.path.join(BASE, "anydl_stamp.txt")
 
 # Used only for plain page and file requests. The downloaders keep their own
@@ -56,9 +68,17 @@ STAMP_FILE = os.path.join(BASE, "anydl_stamp.txt")
 UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 "
       "(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1")
 UPDATE_EVERY = 7 * 24 * 3600
-MAX_ITEMS = 25          # cap for playlists and galleries
+MAX_ITEMS = 25          # cap for galleries and items found on a page
+PLAYLIST_LIMIT = 100    # most videos one playlist download takes
 MENU_LIMIT = 60
 MODES = ("video", "audio", "gallery", "file")
+
+# Settings, as the shortcut saves them (human-readable values).
+DEFAULT_OPTIONS = {"quality": "best", "audio": "original", "updates": "on"}
+QUALITY_HEIGHTS = {"1080p": 1080, "720p": 720, "480p": 480, "data saver": 360}
+
+RELEASES_API = "https://api.github.com/repos/h4sw5q2wr9-byte/AnyDL/releases/latest"
+UPDATE_EVERY_DAY = 24 * 3600
 
 # A single download is shown in a-Shell's own Quick Look preview, which has
 # the same share button as the one in Shortcuts, and is kept in a folder the
@@ -135,6 +155,10 @@ class NeedPick(Exception):
     """Several items were found; the shortcut must ask which to download."""
 
 
+class NeedPlaylistCount(Exception):
+    """The link is a playlist; the shortcut must ask how many to download."""
+
+
 def say(msg=""):
     print(msg, flush=True)
 
@@ -204,9 +228,9 @@ def cleanup_previous(keep_candidates=False):
                         os.remove(path)
         except OSError:
             pass
-    leftovers = [LIST_FILE, LARGE_FILE, CHOICES_FILE]
+    leftovers = [LIST_FILE, LARGE_FILE, CHOICES_FILE, MESSAGE_FILE, OPEN_FILE]
     if not keep_candidates:
-        leftovers.append(CANDIDATES_FILE)
+        leftovers += [CANDIDATES_FILE, PLAYLIST_FILE]
     for path in leftovers:
         try:
             os.remove(path)
@@ -473,6 +497,40 @@ VIDEO_FORMATS = [
     ("bv*[vcodec^=avc1]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b", "mp4"),
     ("b[ext=mp4]/b", None),
 ]
+
+
+def video_formats(quality):
+    """VIDEO_FORMATS, limited to a height for the quality setting."""
+    height = QUALITY_HEIGHTS.get((quality or "").lower())
+    if not height:
+        return VIDEO_FORMATS
+    h = "[height<=%d]" % height
+    return [
+        ("bv*{0}[vcodec^=avc1]+ba[ext=m4a]/b{0}[ext=mp4]/bv*{0}+ba/b{0}/b".format(h), "mp4"),
+        ("b{0}[ext=mp4]/b{0}/b".format(h), None),
+    ]
+
+
+def have_ffmpeg():
+    """Whether yt-dlp can use ffmpeg (to join video and sound, or make MP3s)."""
+    try:
+        from yt_dlp.postprocessor.ffmpeg import FFmpegPostProcessor
+        return bool(FFmpegPostProcessor().available)
+    except Exception:
+        return False
+
+
+def mp3_postprocessors(with_cover=True):
+    steps = []
+    if with_cover:
+        steps.append({"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"})
+    steps += [
+        {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"},
+        {"key": "FFmpegMetadata", "add_metadata": True},
+    ]
+    if with_cover:
+        steps.append({"key": "EmbedThumbnail", "already_have_thumbnail": False})
+    return steps
 AUDIO_FORMATS = [
     ("ba[ext=m4a]/ba[ext=mp3]/ba/b", None),
 ]
@@ -583,6 +641,8 @@ def clean_error(text):
     text = re.sub(r"^ERROR:\s*", "", text.strip())
     text = re.split(r";?\s*please report this issue", text, flags=re.I)[0]
     text = re.split(r"\s*\(caused by ", text)[0]
+    # Drop yt-dlp's command-line advice; it means nothing in an iPhone alert.
+    text = re.split(r"\s+(?:This helps protect our community\.\s*)?Use --cookies|\s+See https://github\.com/yt-dlp", text)[0]
     text = text.strip()
     if re.search(r"NSFW|authenticat|log ?in|sign in|cookies|age.restricted|private", text, re.I):
         text += " (This post needs a logged-in account, and AnyDL has no login.)"
@@ -594,17 +654,31 @@ def looks_unmerged(files):
     return any(re.search(r"\.f[\w-]+\.\w+$", os.path.basename(p)) for p in files)
 
 
-def try_ytdlp(url, folder, audio=False, referer=None):
+def try_ytdlp(url, folder, audio=False, referer=None, options=None, playlist=0):
+    """Download with yt-dlp. playlist > 0 downloads that many playlist items."""
+    options = options or DEFAULT_OPTIONS
     yt_dlp = ensure("yt_dlp", "yt-dlp", extras=("yt-dlp-ejs", "yt-dlp-apple-webkit-jsi"))
-    formats = AUDIO_FORMATS if audio else VIDEO_FORMATS
+    formats = AUDIO_FORMATS if audio else video_formats(options.get("quality"))
+    ffmpeg = yt_dlp is not None and have_ffmpeg()
+    if yt_dlp is not None and not ffmpeg and not audio:
+        # Without ffmpeg, separate video and sound streams cannot be joined,
+        # which limits some sites (YouTube above 360p) to lower quality.
+        formats = [f for f in formats if not f[1]] or formats
+        say("Note: ffmpeg is not available, so some videos come in lower quality.")
+    mp3 = audio and options.get("audio", "").lower() == "mp3"
+    if mp3 and not ffmpeg:
+        say("Note: ffmpeg is not available, so audio keeps its original format.")
+        mp3 = False
     outtmpl = os.path.join(folder, NAME_TEMPLATE)
     error = None
+    attempts = [(fmt, merge, cover) for fmt, merge in formats for cover in ((True, False) if mp3 else (False,))]
 
-    for fmt, merge in formats:
+    for fmt, merge, cover in attempts:
         empty(folder)
         if yt_dlp is None:
-            args = ["-f", fmt, "-o", outtmpl, "--no-playlist", "--playlist-end", str(MAX_ITEMS),
-                    "--no-warnings", "--windows-filenames"]
+            args = ["-f", fmt, "-o", outtmpl, "--no-warnings", "--windows-filenames"]
+            args += (["--yes-playlist", "--playlist-end", str(playlist), "--ignore-errors"]
+                     if playlist else ["--no-playlist"])
             if merge:
                 args += ["--merge-output-format", merge]
             if referer:
@@ -616,15 +690,20 @@ def try_ytdlp(url, folder, audio=False, referer=None):
             opts = {
                 "format": fmt,
                 "outtmpl": outtmpl,
-                "noplaylist": True,
-                "playlistend": MAX_ITEMS,
+                "noplaylist": not playlist,
                 "no_warnings": True,
                 "retries": 3,
                 "fragment_retries": 5,
                 "windowsfilenames": True,
             }
+            if playlist:
+                opts["playlistend"] = playlist
+                opts["ignoreerrors"] = True     # one broken video should not stop the rest
             if merge:
                 opts["merge_output_format"] = merge
+            if mp3:
+                opts["postprocessors"] = mp3_postprocessors(cover)
+                opts["writethumbnail"] = cover
             if referer:
                 opts["http_headers"] = {"Referer": referer}
             try:
@@ -637,12 +716,158 @@ def try_ytdlp(url, folder, audio=False, referer=None):
                     break
                 continue
         files = collect(folder)
+        if mp3 or audio:
+            # Leftover cover images are not downloads.
+            files = [f for f in files if ext_of(f) not in IMAGE_EXT] or files
+        if mp3 and files and not all(f.lower().endswith(".mp3") for f in files):
+            error = "The audio could not be converted to MP3."
+            continue
         if files and not looks_unmerged(files):
             return tidy_media_names(files)
         if files:
             error = "The video and sound could not be joined (ffmpeg is missing)."
     empty(folder)
     raise Failed(error or "yt-dlp found nothing to download.")
+
+
+# ---------------------------------------------------------------- playlists
+
+def is_playlist_link(url):
+    """Whether yt-dlp treats the link as a playlist, channel or profile.
+
+    Decided from the link alone, so single videos are not looked up twice.
+    """
+    try:
+        from yt_dlp.extractor import gen_extractor_classes
+    except ImportError:
+        return False
+    for ie in gen_extractor_classes():
+        if ie.IE_NAME == "generic" or not ie.suitable(url):
+            continue
+        kind = getattr(ie, "_RETURN_TYPE", None)
+        if kind == "playlist":
+            return True
+        if ie.IE_NAME == "youtube:tab":
+            # Playlists and channels; a watch link inside a playlist is one video.
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+            return "v" not in query and "/watch" not in url
+        return False
+    return False
+
+
+def playlist_info(url):
+    """(title, number of items up to PLAYLIST_LIMIT + 1) of a playlist link."""
+    import itertools
+    yt_dlp = ensure("yt_dlp", "yt-dlp", extras=("yt-dlp-ejs", "yt-dlp-apple-webkit-jsi"))
+    if yt_dlp is None:
+        raise Failed("Playlists need yt-dlp to load in Python.")
+    opts = {"extract_flat": "in_playlist", "quiet": True, "no_warnings": True,
+            "playlistend": PLAYLIST_LIMIT + 1}
+    try:
+        stop_solver_navigation()
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False, process=False)
+            entries = info.get("entries") or []
+            count = len(list(itertools.islice(entries, PLAYLIST_LIMIT + 1)))
+    except Exception as e:
+        raise Failed(clean_error(e))
+    title = info.get("title") or info.get("uploader") or info.get("id") or "Playlist"
+    return title, count
+
+
+def ask_playlist_count(mode, url, options):
+    title, count = playlist_info(url)
+    if not count:
+        raise Failed("This playlist is empty, or private.")
+    what = "videos" if mode == "video" else "tracks"
+    choices = ["%d %s" % (n, what) for n in (5, 10, 25, 50) if n < count]
+    choices.append(("All %d %s" % (count, what)) if count <= PLAYLIST_LIMIT
+                   else "First %d %s" % (PLAYLIST_LIMIT, what))
+    with open(PLAYLIST_FILE, "w", encoding="utf-8") as f:
+        json.dump({"url": url, "mode": mode, "title": title, "options": options}, f)
+    with open(CHOICES_FILE, "w", encoding="utf-8") as f:
+        f.write("\n".join(choices))
+    more = "more than %d" % PLAYLIST_LIMIT if count > PLAYLIST_LIMIT else str(count)
+    with open(MESSAGE_FILE, "w", encoding="utf-8") as f:
+        f.write("%s has %s %s. How many do you want?" % (nice_title(title) or "This playlist", more, what))
+    raise NeedPlaylistCount()
+
+
+def run_playlist(lines):
+    """Download the amount chosen in the shortcut into its own Files folder."""
+    try:
+        with open(PLAYLIST_FILE, encoding="utf-8") as f:
+            job = json.load(f)
+    except (OSError, ValueError):
+        raise Failed("The playlist details are gone. Run the shortcut again.")
+    m = re.search(r"(\d+)", " ".join(lines))
+    if not m:
+        raise Failed("Nothing was selected.")
+    amount = min(int(m.group(1)), PLAYLIST_LIMIT)
+    title = nice_title(job.get("title") or "") or "Playlist"
+    say("Downloading %d from %s" % (amount, title))
+    files = try_ytdlp(job["url"], new_folder("playlist"), audio=(job.get("mode") == "audio"),
+                      options=job.get("options"), playlist=amount)
+    folder = os.path.join(VISIBLE_DIR, safe_name(title, "Playlist"))
+    n = 2
+    base = folder
+    while os.path.exists(folder):
+        folder = "%s (%d)" % (base, n)
+        n += 1
+    os.makedirs(folder)
+    for src in files:
+        shutil.move(src, os.path.join(folder, os.path.basename(src)))
+    what = "videos" if job.get("mode") == "video" else "tracks"
+    missing = amount - len(files)
+    note = (" %d could not be downloaded." % missing) if missing > 0 else ""
+    with open(MESSAGE_FILE, "w", encoding="utf-8") as f:
+        f.write("Saved %d %s in Files › On My iPhone › a-Shell › AnyDL › %s.%s"
+                % (len(files), what, os.path.basename(folder), note))
+    with open(OPEN_FILE, "w", encoding="utf-8") as f:
+        f.write("shareddocuments://" + urllib.parse.quote(os.path.realpath(folder)))
+    return len(files)
+
+
+# ---------------------------------------------------------------- updates
+
+def version_tuple(text):
+    return tuple(int(x) for x in re.findall(r"\d+", text or "")[:3])
+
+
+def check_for_update(options):
+    """Once a day, note a newer AnyDL release for the shortcut to offer.
+
+    Each new version is offered once: the shortcut clears the note after
+    showing it, and the version is remembered so it is not written again.
+    """
+    if options.get("updates", "").lower() == "off":
+        return
+    try:
+        with open(UPDATE_STATE_FILE, encoding="utf-8") as f:
+            state = json.load(f)
+    except (OSError, ValueError):
+        state = {}
+    if time.time() - state.get("checked", 0) < UPDATE_EVERY_DAY:
+        return
+    state["checked"] = time.time()
+    try:
+        req = urllib.request.Request(RELEASES_API, headers={
+            "User-Agent": "AnyDL/%s" % VERSION, "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            latest = (json.load(resp).get("tag_name") or "").lstrip("v")
+        if (version_tuple(latest) > version_tuple(VERSION)
+                and latest != state.get("announced")):
+            with open(UPDATE_FILE, "w", encoding="utf-8") as f:
+                f.write(latest)
+            state["announced"] = latest
+            say("AnyDL %s is available." % latest)
+    except Exception:
+        pass        # offline or rate-limited: try again tomorrow
+    try:
+        with open(UPDATE_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f)
+    except OSError:
+        pass
 
 
 # ---------------------------------------------------------------- gallery-dl
@@ -898,24 +1123,38 @@ def run_pick(lines):
 # ---------------------------------------------------------------- main
 
 def read_job():
+    """Return (mode, payload lines, options) from the job file.
+
+    key=value lines are settings: first the saved ones, then any chosen for
+    this run, so the last one wins.
+    """
     try:
         with open(JOB_FILE, encoding="utf-8") as f:
             lines = [l.strip() for l in f.read().splitlines() if l.strip()]
     except OSError:
         lines = sys.argv[1:]
-    if not lines:
-        return None, []
-    mode = lines[0].lower()
-    if mode == "pick":
-        return mode, lines[1:]
-    rest = " ".join(lines[1:]) if mode in MODES else " ".join(lines)
+    options = dict(DEFAULT_OPTIONS)
+    payload = []
+    for line in lines:
+        m = re.match(r"^([a-z]+)=(.*)$", line)
+        if m:
+            options[m.group(1)] = m.group(2).strip()
+        else:
+            payload.append(line)
+    if not payload:
+        return None, [], options
+    mode = payload[0].lower()
+    if mode in ("pick", "playlist"):
+        return mode, payload[1:], options
+    rest = " ".join(payload[1:]) if mode in MODES else " ".join(payload)
     if mode not in MODES:
         mode = "video"
     m = re.search(r"https?://[^\s<>\"']+", rest)
-    return mode, ([m.group(0)] if m else [])
+    return mode, ([m.group(0)] if m else []), options
 
 
-def run(mode, url):
+def run(mode, url, options=None):
+    options = options or DEFAULT_OPTIONS
     page = None
     probe_error = None
 
@@ -948,10 +1187,13 @@ def run(mode, url):
                 pass
 
     tool_error = None
+    if mode in ("video", "audio") and is_playlist_link(url):
+        say("\nThis is a playlist.")
+        ask_playlist_count(mode, url, options)
     if mode in ("video", "audio"):
         say("\nTrying yt-dlp...")
         try:
-            return try_ytdlp(url, new_folder("ytdlp"), audio=(mode == "audio"))
+            return try_ytdlp(url, new_folder("ytdlp"), audio=(mode == "audio"), options=options)
         except Failed as e:
             tool_error = str(e)
             say("  %s" % e)
@@ -992,22 +1234,36 @@ def main():
     os.makedirs(BASE, exist_ok=True)
     os.chdir(BASE)
     write_status("The download did not finish. Run the shortcut again and wait for a-Shell to return.")
-    mode, args = read_job()
-    cleanup_previous(keep_candidates=(mode == "pick"))
+    mode, args, options = read_job()
+    cleanup_previous(keep_candidates=(mode in ("pick", "playlist")))
     say("AnyDL %s" % VERSION)
     try:
         if mode == "pick":
             files = publish(run_pick(args))
+        elif mode == "playlist":
+            run_playlist(args)
+            shutil.rmtree(TMP, ignore_errors=True)
+            write_status("SAVED")
+            say("\nDone.")
+            back_to_shortcuts()
+            sys.exit(0)
         else:
             if not args:
                 finish(error="No link was given.")
             say("%s: %s" % (mode, args[0]))
+            check_for_update(options)
             weekly_update()
-            files = publish(run(mode, args[0]))
+            files = publish(run(mode, args[0], options))
     except NeedPick:
         shutil.rmtree(TMP, ignore_errors=True)
         write_status("PICK")
         say("\nSeveral items found - choose in the shortcut.")
+        back_to_shortcuts()
+        sys.exit(0)
+    except NeedPlaylistCount:
+        shutil.rmtree(TMP, ignore_errors=True)
+        write_status("PLAYLIST")
+        say("\nChoose how many in the shortcut.")
         back_to_shortcuts()
         sys.exit(0)
     except Failed as e:

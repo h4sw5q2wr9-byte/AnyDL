@@ -25,7 +25,12 @@ Look, ready to save to Photos or Files.
   hashtags, links or emoji.
 - **Honest errors.** If a download fails, the alert shows the downloader's own
   message.
-- **Stays current.** The downloaders update themselves once a week.
+- **Your choice of quality.** Best, 1080p, 720p, 480p or Data saver, or
+  ask every time. Audio can be saved as MP3 with its cover image.
+- **Playlists, channels and profiles.** Choose how many to download, up to
+  100; they are saved together in a folder in the Files app.
+- **Stays current.** The downloaders update themselves once a week, and
+  AnyDL tells you when a new version of itself is out.
 - **Better X support.** When X hides a post's video from logged-out
   visitors, AnyDL gets it through [FxTwitter](https://github.com/FxEmbed/FxEmbed).
 
@@ -64,6 +69,30 @@ back to Shortcuts and previews them there, so you can swipe through them. If
 one of them is over 50 MB, the largest opens in a-Shell instead, because
 Shortcuts cannot reliably receive large files from a-Shell; the rest are in
 the AnyDL folder.
+
+### Settings
+
+Choose **Settings** in the menu to change:
+
+| Setting | Options |
+| --- | --- |
+| Video quality | Best (default), 1080p, 720p, 480p, Data saver (360p), Ask each time |
+| Audio format | Original (default), MP3 with cover image |
+| Check for updates | On (default), Off |
+
+Above 360p, sites such as YouTube send video and sound separately, and
+joining them needs ffmpeg. The full a-Shell app is expected to have it; if it
+is missing, AnyDL says so and downloads the best single file instead. MP3
+needs ffmpeg too.
+
+### Playlists
+
+Share a playlist, channel or profile (YouTube, TikTok, SoundCloud, Vimeo and
+other sites yt-dlp supports) and choose **Download Video** or
+**Download Audio**. AnyDL asks how many to get, then saves them in
+**On My iPhone › a-Shell › AnyDL › (playlist name)**. These folders are kept;
+they are not cleared by the next download. From Files you can select them
+all and save them to Photos at once.
 
 ## How it works
 
@@ -112,9 +141,14 @@ files.
 ## Privacy
 
 AnyDL runs entirely on your device. It has no server, no analytics and no
-account. It contacts the site you are downloading from, PyPI to install and
-update the downloaders, and, only when X will not hand over a post's media,
-FxTwitter's public API (`api.fxtwitter.com`), which receives that post's id.
+account. It contacts:
+
+- the site you are downloading from;
+- PyPI, to install and update the downloaders;
+- GitHub, once a day, to see whether a new AnyDL release is out (switch this
+  off in Settings);
+- FxTwitter's public API (`api.fxtwitter.com`), only when X will not hand
+  over a post's media; it receives that post's id.
 
 ## Build from source
 
