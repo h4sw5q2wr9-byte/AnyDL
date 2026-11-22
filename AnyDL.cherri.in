@@ -55,8 +55,13 @@ if @input contains "anydl-return" {
         const askFile = aShellGet("anydl_message.txt", true, true)
         const amountsFile = aShellGet("anydl_choices.txt", true, true)
         const amounts = splitText("{amountsFile}", "\n")
-        const amount = chooseFromList(amounts, "{askFile}")
-        const amountText = "playlist\n{amount}"
+        const amountPicked = chooseFromList(amounts, "{askFile}")
+        @amount = "{amountPicked}"
+        if @amount contains "Choose" {
+            const numberFile = aShellGet("anydl_number.txt", true, true)
+            @amount = prompt("{numberFile}", "Number")
+        }
+        const amountText = "playlist\n{@amount}"
         const amountFile = setName(amountText, "anydl_job.txt", true)
         aShellPut(amountFile, true)
         aShellRun("cd $SHORTCUTS\npython anydl.py", "open", false)
@@ -135,10 +140,14 @@ const iconSettings = "__ICON_SETTINGS__"
 @menuText = "{@items}"
 @menuFile = setName(@menuText, "menu.vcf", true)
 @menuCards = @menuFile.contact
+/* The main menu comes back after Settings; choosing a download leaves the
+   loop by ending the shortcut once a-Shell has been started. */
+repeat round for 20 {
 @choice = chooseFromList(@menuCards, @heading)
 @choiceName = "{@choice}"
 
-/* Settings: change one at a time until Done. Values are stored as shown. */
+/* Settings: change one at a time until Done, then back to the main menu.
+   Values are stored as shown. */
 if @choiceName contains "Settings" {
     @quality = "Best"
     if @settings contains "quality=1080p" {
@@ -164,7 +173,9 @@ if @choiceName contains "Settings" {
     if @settings contains "updates=Off" {
         @updates = "Off"
     }
+    @settingsDone = false
     repeat i for 20 {
+        if @settingsDone == false {
         menu "Settings" {
             item "Video quality: {@quality}":
                 @qualities = list("Best", "1080p", "720p", "480p", "Data saver", "Ask each time")
@@ -176,15 +187,17 @@ if @choiceName contains "Settings" {
                 @onOff = list("On", "Off")
                 @updates = chooseFromList(@onOff, "Check for updates once a day")
             item "Done":
-                stop()
+                @settingsDone = true
         }
-        const newSettings = "quality={@quality}\naudio={@audio}\nupdates={@updates}"
-        const newSettingsFile = setName(newSettings, "anydl_settings.txt", true)
+        @settings = "quality={@quality}\naudio={@audio}\nupdates={@updates}"
+        const newSettingsFile = setName(@settings, "anydl_settings.txt", true)
         aShellPut(newSettingsFile, true)
+        }
     }
-    stop()
 }
 
+
+if @choiceName !contains "Settings" {
 if !@link {
     @link = prompt("Paste the link to download", "URL")
 }
@@ -221,3 +234,6 @@ aShellPut(jobFile, true)
 /* 4. Start the download in a-Shell. This shortcut ends here; a-Shell shows
       the result, or starts AnyDL again when it needs to. */
 aShellRun("cd $SHORTCUTS\npython anydl.py", "open", false)
+stop()
+}
+}

@@ -89,7 +89,7 @@ needs ffmpeg too.
 
 Share a playlist, channel or profile (YouTube, TikTok, SoundCloud, Vimeo and
 other sites yt-dlp supports) and choose **Download Video** or
-**Download Audio**. AnyDL asks how many to get, then saves them in
+**Download Audio**. Choose all, or type how many, then AnyDL saves them in
 **On My iPhone › a-Shell › AnyDL › (playlist name)**. These folders are kept;
 they are not cleared by the next download. From Files you can select them
 all and save them to Photos at once.

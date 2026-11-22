@@ -5,9 +5,13 @@
 - **Settings**, a new menu item: video quality (Best, 1080p, 720p, 480p,
   Data saver or Ask each time), audio format (Original or MP3 with cover
   image), and the update check.
-- **Playlists, channels and profiles**: AnyDL asks how many to download (up
-  to 100) and saves them in their own folder in the Files app, with a button
-  to open it.
+- **Playlists, channels and profiles**: download all, or type how many (up
+  to 100). They are saved in their own folder in the Files app, with a
+  button to open it.
+- Leaving Settings returns to the main menu.
+- The quality setting now works for upright videos (TikTok, Shorts) too:
+  "720p" means the short side of the picture. a-Shell shows the resolution
+  you got.
 - **Update check**: once a day AnyDL looks for a newer release on GitHub and
   offers it once.
 - Clearer note when ffmpeg is not available, which limits some videos to

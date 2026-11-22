@@ -13,6 +13,7 @@ anydl_job.txt, runs this script, and reads the result back:
                        one-line error message
     anydl_message.txt  when PLAYLIST or SAVED: the text for the shortcut to show
     anydl_open.txt     when SAVED: a link that opens the folder in Files
+    anydl_number.txt   when PLAYLIST: the question for typing an amount
     anydl_update.txt   a newer AnyDL version, once (see check_for_update)
     anydl_files.txt    when OK: one downloaded file name per line
     anydl_choices.txt  when PICK or PLAYLIST: one entry per line to choose from
@@ -59,6 +60,7 @@ CANDIDATES_FILE = os.path.join(BASE, "anydl_candidates.json")
 PLAYLIST_FILE = os.path.join(BASE, "anydl_playlist.json")
 MESSAGE_FILE = os.path.join(BASE, "anydl_message.txt")
 OPEN_FILE = os.path.join(BASE, "anydl_open.txt")
+NUMBER_FILE = os.path.join(BASE, "anydl_number.txt")
 UPDATE_FILE = os.path.join(BASE, "anydl_update.txt")
 UPDATE_STATE_FILE = os.path.join(BASE, "anydl_update_state.json")
 STAMP_FILE = os.path.join(BASE, "anydl_stamp.txt")
@@ -228,7 +230,7 @@ def cleanup_previous(keep_candidates=False):
                         os.remove(path)
         except OSError:
             pass
-    leftovers = [LIST_FILE, LARGE_FILE, CHOICES_FILE, MESSAGE_FILE, OPEN_FILE]
+    leftovers = [LIST_FILE, LARGE_FILE, CHOICES_FILE, MESSAGE_FILE, OPEN_FILE, NUMBER_FILE]
     if not keep_candidates:
         leftovers += [CANDIDATES_FILE, PLAYLIST_FILE]
     for path in leftovers:
@@ -500,15 +502,25 @@ VIDEO_FORMATS = [
 
 
 def video_formats(quality):
-    """VIDEO_FORMATS, limited to a height for the quality setting."""
-    height = QUALITY_HEIGHTS.get((quality or "").lower())
-    if not height:
+    """VIDEO_FORMATS, limited to a resolution for the quality setting.
+
+    "720p" means the short side of the picture, so an upright video (TikTok,
+    Shorts) of 720x1280 counts as 720p. yt-dlp's filters cannot take the
+    smaller of two fields, so wide and upright formats get their own filter.
+    If nothing is small enough, the smallest available is taken ("w").
+    """
+    limit = QUALITY_HEIGHTS.get((quality or "").lower())
+    if not limit:
         return VIDEO_FORMATS
-    h = "[height<=%d]" % height
-    return [
-        ("bv*{0}[vcodec^=avc1]+ba[ext=m4a]/b{0}[ext=mp4]/bv*{0}+ba/b{0}/b".format(h), "mp4"),
-        ("b{0}[ext=mp4]/b{0}/b".format(h), None),
-    ]
+    sides = ("[aspect_ratio>=?1][height<=?%d]" % limit,   # wide, or size unknown
+             "[aspect_ratio<1][width<=?%d]" % limit)      # upright
+
+    def alternatives(*pieces):
+        return "/".join(piece.format(side) for piece in pieces for side in sides)
+
+    merged = alternatives("bv*{0}[vcodec^=avc1]+ba[ext=m4a]", "b{0}[ext=mp4]", "bv*{0}+ba", "b{0}")
+    single = alternatives("b{0}[ext=mp4]", "b{0}")
+    return [(merged + "/w", "mp4"), (single + "/w", None)]
 
 
 def have_ffmpeg():
@@ -709,7 +721,10 @@ def try_ytdlp(url, folder, audio=False, referer=None, options=None, playlist=0):
             try:
                 stop_solver_navigation()
                 with yt_dlp.YoutubeDL(opts) as ydl:
-                    ydl.download([url])
+                    info = ydl.extract_info(url) or {}
+                if not audio and not playlist and info.get("width") and info.get("height"):
+                    say("Quality: %dp (%sx%s)" % (min(info["width"], info["height"]),
+                                                  info["width"], info["height"]))
             except Exception as e:
                 error = clean_error(e)
                 if "Unsupported URL" in error or "DRM" in error or "No video could be found" in error:
@@ -780,13 +795,18 @@ def ask_playlist_count(mode, url, options):
     if not count:
         raise Failed("This playlist is empty, or private.")
     what = "videos" if mode == "video" else "tracks"
-    choices = ["%d %s" % (n, what) for n in (5, 10, 25, 50) if n < count]
-    choices.append(("All %d %s" % (count, what)) if count <= PLAYLIST_LIMIT
-                   else "First %d %s" % (PLAYLIST_LIMIT, what))
+    most = min(count, PLAYLIST_LIMIT)
+    choices = [("All %d %s" % (count, what)) if count <= PLAYLIST_LIMIT
+               else "First %d %s" % (PLAYLIST_LIMIT, what)]
+    if most > 1:
+        choices.append("Choose a number")
     with open(PLAYLIST_FILE, "w", encoding="utf-8") as f:
-        json.dump({"url": url, "mode": mode, "title": title, "options": options}, f)
+        json.dump({"url": url, "mode": mode, "title": title, "options": options,
+                   "most": most}, f)
     with open(CHOICES_FILE, "w", encoding="utf-8") as f:
         f.write("\n".join(choices))
+    with open(NUMBER_FILE, "w", encoding="utf-8") as f:
+        f.write("How many %s? (1 to %d)" % (what, most))
     more = "more than %d" % PLAYLIST_LIMIT if count > PLAYLIST_LIMIT else str(count)
     with open(MESSAGE_FILE, "w", encoding="utf-8") as f:
         f.write("%s has %s %s. How many do you want?" % (nice_title(title) or "This playlist", more, what))
@@ -803,7 +823,8 @@ def run_playlist(lines):
     m = re.search(r"(\d+)", " ".join(lines))
     if not m:
         raise Failed("Nothing was selected.")
-    amount = min(int(m.group(1)), PLAYLIST_LIMIT)
+    most = job.get("most") or PLAYLIST_LIMIT
+    amount = max(1, min(int(m.group(1)), most, PLAYLIST_LIMIT))
     title = nice_title(job.get("title") or "") or "Playlist"
     say("Downloading %d from %s" % (amount, title))
     files = try_ytdlp(job["url"], new_folder("playlist"), audio=(job.get("mode") == "audio"),
@@ -817,7 +838,8 @@ def run_playlist(lines):
     os.makedirs(folder)
     for src in files:
         shutil.move(src, os.path.join(folder, os.path.basename(src)))
-    what = "videos" if job.get("mode") == "video" else "tracks"
+    what = "video" if job.get("mode") == "video" else "track"
+    what += "" if len(files) == 1 else "s"
     missing = amount - len(files)
     note = (" %d could not be downloaded." % missing) if missing > 0 else ""
     with open(MESSAGE_FILE, "w", encoding="utf-8") as f:
