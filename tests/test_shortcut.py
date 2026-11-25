@@ -136,3 +136,14 @@ def test_errors_return_to_the_menu():
     second_half = code[code.index('if @input contains "anydl-return"'):code.index("const welcomeText")]
     assert 'alert("{@status}", "AnyDL")' in second_half
     assert 'alert("{@status}", "AnyDL")\n            stop()' not in second_half
+
+
+def test_old_results_cannot_come_back():
+    second_half = code[code.index('if @input contains "anydl-return"'):code.index("const welcomeText")]
+    assert second_half.index('"DONE"') < second_half.index('if @status == "PICK"')
+    assert 'if @status != "DONE"' in second_half
+
+
+def test_a_download_never_starts_without_a_link():
+    guard = code.index("There is no web link to download")
+    assert guard < code.index('aShellRun("cd $SHORTCUTS', code.index('@extra = ""'))

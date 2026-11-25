@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.4
+
+**Fixed**
+
+- A message from an earlier download, such as "No web link was found", could
+  appear again later, for example when opening Media tools. Each result is
+  now shown once and then marked as seen.
+- A download never starts without a web link.
+
 ## 3.3
 
 **Fixed**

@@ -71,6 +71,11 @@ action 'encodemedia' encodeVideoHEVC4K(variable video: 'WFMedia') {
 if @input contains "anydl-return" {
     const statusFile = aShellGet("anydl_status.txt", true, true)
     @status = "{statusFile}"
+    /* A result is shown once: mark it as seen so an old one can never come
+       back as a surprise message later. */
+    const seenStatusText = "DONE"
+    const seenStatusFile = setName(seenStatusText, "anydl_status.txt", true)
+    aShellPut(seenStatusFile, true)
     if @status == "PICK" {
         /* Several items on the page: pick here, then run the downloader again. */
         const choicesFile = aShellGet("anydl_choices.txt", true, true)
@@ -143,8 +148,12 @@ if @input contains "anydl-return" {
             stop()
         }
         /* An error: say what went wrong, then the menu, so AnyDL stays
-           usable. */
-        alert("{@status}", "AnyDL")
+           usable. Results already shown (DONE) and empty ones are skipped. */
+        if @status != "DONE" {
+            if @status {
+                alert("{@status}", "AnyDL")
+            }
+        }
     }
 }
 
@@ -382,6 +391,13 @@ repeat round for 60 {
     }
 
     /* -------------------------------------------- Download. */
+    /* A download needs a web link; never start a-Shell without one. */
+    if @mode {
+        if !@link {
+            alert("There is no web link to download. Copy a link and run AnyDL again, or use Media tools for videos and photos.", "AnyDL")
+            @mode = ""
+        }
+    }
     if @mode {
         /* Video quality for this download, when the setting says to ask. */
         @extra = ""
