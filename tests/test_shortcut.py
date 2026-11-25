@@ -116,7 +116,7 @@ def test_a_file_name_is_not_taken_for_a_link():
     for link in ("https://youtu.be/abc", "https://example.com/video.mp4", "https://www.tiktok.com/@a/video/1",
                  "https://x.com/a/status/1"):
         assert not re.search(pattern, link, re.I), link
-    assert code.index("fileNameFound") < code.index('fileDetailOf(@firstShared, "File Extension")')
+    assert code.index("typeOf(@firstShared)") < code.index("getURLs(")
 
 
 def test_only_web_links_are_downloaded():
@@ -133,13 +133,13 @@ def test_media_tools_accept_a_shared_file_without_an_extension():
 
 
 def test_errors_return_to_the_menu():
-    second_half = code[code.index('if @input contains "anydl-return"'):code.index("const welcomeText")]
+    second_half = code[code.index('if @input == "anydl-return"'):code.index("const welcomeText")]
     assert 'alert("{@status}", "AnyDL")' in second_half
     assert 'alert("{@status}", "AnyDL")\n            stop()' not in second_half
 
 
 def test_old_results_cannot_come_back():
-    second_half = code[code.index('if @input contains "anydl-return"'):code.index("const welcomeText")]
+    second_half = code[code.index('if @input == "anydl-return"'):code.index("const welcomeText")]
     assert second_half.index('"DONE"') < second_half.index('if @status == "PICK"')
     assert 'if @status != "DONE"' in second_half
 
@@ -174,3 +174,14 @@ def test_every_kind_of_input_has_a_screen():
     assert '@view = "tools"' in block            # files → their tools
     assert "@link = getFirstItem(found)" in block  # web links → download menu
     assert "Which tools?" in block                # unknown files → pick tools
+
+
+def test_shared_media_is_routed_before_url_coercion():
+    assert code.index("typeOf(@firstShared)") < code.index("getURLs(")
+    router = code[code.index('@shared = nil'):code.index('@heading = "AnyDL"')]
+    assert 'if textOrURLKind {' in router
+    assert 'getURLs("{@candidateText}")' in router
+    assert 'getURLs("{ShortcutInput}")' not in router
+    assert '@shared = @firstShared' in router
+    assert '@view = "tools"' in router
+    assert 'if @input == "anydl-return"' in code
