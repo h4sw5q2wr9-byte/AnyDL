@@ -222,23 +222,24 @@ if @update contains "." {
 /* ------------------------------------------------ What was shared. */
 /* A link (shared, or on the clipboard) opens the download menu. A photo,
    video or audio file shared to AnyDL opens the matching media tools. */
-const found = getURLs("{ShortcutInput}")
-@link = getFirstItem(found)
 @shared
 @sharedKind = ""
 @view = "home"
+@link = ""
 @videoTypes = "mov mp4 m4v 3gp avi mkv webm hevc"
 @photoTypes = "heic heif jpg jpeg png gif webp tiff tif bmp dng avif"
 @audioTypes = "m4a mp3 wav aac aiff aif caf flac ogg opus"
-if !@link {
-    if @input !contains "anydl-return" {
-        const inputKind = typeOf(ShortcutInput)
-        @kind = "{inputKind}"
-        if @kind contains "Image" || @kind contains "Media" || @kind contains "File" {
-            @shared = ShortcutInput
-            @view = "tools"
-        }
-    }
+/* The type comes first: a shared video's name, such as IMG_1234.MOV,
+   reads as a link (.mov is a web domain), so looking for links first
+   would offer to download it. */
+const inputKind = typeOf(ShortcutInput)
+@kind = "{inputKind}"
+if @kind contains "Image" || @kind contains "Media" || @kind contains "File" || @kind contains "PDF" {
+    @shared = getFirstItem(ShortcutInput)
+    @view = "tools"
+} else {
+    const found = getURLs("{ShortcutInput}")
+    @link = getFirstItem(found)
 }
 @heading = "AnyDL"
 if @link {
@@ -385,6 +386,11 @@ repeat round for 60 {
             }
             if @sharedKind == "audio" {
                 @view = "tools-audio"
+            }
+            if @sharedKind == "other" {
+                alert("AnyDL's tools work on videos, photos and audio. To download something, share its link instead.", "AnyDL")
+                @shared = nil
+                @sharedKind = ""
             }
         }
     }

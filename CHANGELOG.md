@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.1
+
+**Fixed**
+
+- Sharing a video from Photos to AnyDL opened the download menu instead of
+  the video tools: the video's name, such as IMG_1234.MOV, was read as a
+  link (.mov is a web domain). AnyDL now checks what was shared first, so a
+  shared video opens Video tools with Compress video at the top, and a
+  shared photo or audio file opens its tools the same way.
+- Sharing several videos at once uses the first one.
+- Sharing a file the tools cannot edit, such as a PDF, now says so.
+
 ## 3.0
 
 The first release with a full redesign: a menu with icons, media tools, an

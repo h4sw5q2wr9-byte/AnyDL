@@ -106,3 +106,8 @@ def test_video_sizes_use_the_multiplication_sign():
     sizes = re.findall(r'encodeVideo\w*\([^)]*"([^"]*\d+[x×]\d+)"', code)
     sizes += re.findall(r'"WFMediaSize": "([^"]+)"', code)
     assert sizes and all("x" not in size for size in sizes), sizes
+
+
+def test_shared_files_are_recognised_before_links():
+    # A shared video's name (IMG_1234.MOV) reads as a link: .mov is a web domain.
+    assert code.index("typeOf(ShortcutInput)") < code.index('getURLs("{ShortcutInput}")')
