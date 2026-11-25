@@ -12,7 +12,7 @@
 #define name AnyDL
 #define color blue
 #define glyph circledDownArrow
-#define inputs url, text, webpage, image, media, file
+#define inputs media, image, file, url, text, webpage
 #define from sharesheet
 #define noinput getclipboard
 
@@ -67,8 +67,18 @@ action 'encodemedia' encodeVideoHEVC4K(variable video: 'WFMedia') {
      anydl-return as input. */
 
 /* ------------------------------------------------ Second half: results. */
-@input = "{ShortcutInput}"
-if @input contains "anydl-return" {
+@firstShared = nil
+@kind = ""
+@input = ""
+if ShortcutInput {
+    @firstShared = getFirstItem(ShortcutInput)
+    const rawInputKind = typeOf(@firstShared)
+    @kind = lowercase("{rawInputKind}")
+    if @kind == "text" || @kind == "tekst" {
+        @input = "{@firstShared}"
+    }
+}
+if @input == "anydl-return" {
     const statusFile = aShellGet("anydl_status.txt", true, true)
     @status = "{statusFile}"
     /* A result is shown once: mark it as seen so an old one can never come
@@ -230,101 +240,85 @@ if @update contains "." {
 }
 
 /* ------------------------------------------------ What was shared. */
-/* A link (shared, or on the clipboard) opens the download menu. A photo,
-   video or audio file shared to AnyDL opens the matching media tools. */
-@shared
+@shared = nil
 @sharedKind = ""
 @view = "home"
 @link = ""
-@videoTypes = "mov mp4 m4v 3gp avi mkv webm hevc"
-@photoTypes = "heic heif jpg jpeg png gif webp tiff tif bmp dng avif"
-@audioTypes = "m4a mp3 wav aac aiff aif caf flac ogg opus"
-/* What was shared decides the first screen:
-     a video → Video tools, a photo → Photo tools, audio → Audio tools,
-     a web link → the download menu, nothing (or plain text) → the main menu.
-   iOS's own type comes first. A shared file can also arrive as a link to
-   the file (file:///…/IMG_1234.MOV) or as its name, so only http and https
-   links are downloads, and a file's kind comes from its file extension. */
-@kind = ""
+@videoTypes = " mov mp4 m4v 3gp avi mkv webm hevc "
+@photoTypes = " heic heif jpg jpeg png gif webp tiff tif bmp dng avif "
+@audioTypes = " m4a mp3 wav aac aiff aif caf flac ogg opus "
 @extension = ""
-if @input !contains "anydl-return" {
-    if ShortcutInput {
-        const inputKind = typeOf(ShortcutInput)
-        @kind = "{inputKind}"
-        @firstShared = getFirstItem(ShortcutInput)
-        @sharedText = "{@firstShared}"
-
-        /* A web link. */
-        @isText = false
-        if @kind contains "Text" || @kind contains "URL" || @kind contains "web page" {
-            @isText = true
-            const found = getURLs("{ShortcutInput}")
-            @link = getFirstItem(found)
-            const webLinkFound = matchText('(?i)^https?://', "{@link}")
-            if !webLinkFound {
-                @link = ""
-            }
-            const fileNameFound = matchText('(?i)^(https?://)?[^/]+\.(mov|mp4|m4v|3gp|avi|mkv|webm|hevc|heic|heif|jpg|jpeg|png|gif|webp|tiff|tif|bmp|dng|avif|m4a|mp3|wav|aac|aiff|aif|caf|flac|ogg|opus|pdf|zip)/?$', "{@link}")
-            if fileNameFound {
-                @link = ""
-            }
-        }
-
-        /* A file: video, photo or audio, from its file extension, read
-           from the file or from the end of its name or file link. */
-        if !@link {
-            const detailExtension = fileDetailOf(@firstShared, "File Extension")
-            @extension = lowercase("{detailExtension}")
-            if !@extension {
-                const endingFound = matchText('(?i)\.[a-z0-9]{2,5}$', "{@sharedText}")
-                const ending = getFirstItem(endingFound)
-                const endingText = replaceText(".", "", "{ending}")
-                @extension = lowercase("{endingText}")
-            }
-            if @extension {
-                if @videoTypes contains @extension {
+if @input != "anydl-return" {
+    if @firstShared {
+        // Only text and genuine URL items may enter URL extraction.
+        const textOrURLKind = matchText('(?i)^(text|tekst|url|website|webpage|web page|safari web page|webpagina|safari-webpagina)$', "{@kind}")
+        if textOrURLKind {
+            @candidateText = "{@firstShared}"
+            const localFileURL = matchText('(?i)^file://', "{@candidateText}")
+            if localFileURL {
+                // Preserve a local file URL; it must never start a download.
+                @sharedKind = "ask"
+                const localVideoURL = matchText('(?i)\.(mov|mp4|m4v|3gp|avi|mkv|webm|hevc)$', "{@candidateText}")
+                const localPhotoURL = matchText('(?i)\.(heic|heif|jpg|jpeg|png|gif|webp|tiff|tif|bmp|dng|avif)$', "{@candidateText}")
+                const localAudioURL = matchText('(?i)\.(m4a|mp3|wav|aac|aiff|aif|caf|flac|ogg|opus)$', "{@candidateText}")
+                if localVideoURL {
                     @sharedKind = "video"
                 }
-                if @photoTypes contains @extension {
+                if localPhotoURL {
                     @sharedKind = "photo"
                 }
-                if @audioTypes contains @extension {
+                if localAudioURL {
+                    @sharedKind = "audio"
+                }
+            } else {
+                const found = getURLs("{@candidateText}")
+                @link = getFirstItem(found)
+                const webLinkFound = matchText('(?i)^https?://', "{@link}")
+                if !webLinkFound {
+                    @link = ""
+                }
+                const fileNameFound = matchText('(?i)^(https?://)?[^/]+\.(mov|mp4|m4v|3gp|avi|mkv|webm|hevc|heic|heif|jpg|jpeg|png|gif|webp|tiff|tif|bmp|dng|avif|m4a|mp3|wav|aac|aiff|aif|caf|flac|ogg|opus|pdf|zip)/?$', "{@link}")
+                if fileNameFound {
+                    @link = ""
+                }
+            }
+        } else {
+            // Native media never passes through Get URLs or text conversion.
+            const sharedExtension = fileDetailOf(@firstShared, "File Extension")
+            @extension = lowercase("{sharedExtension}")
+            if @extension {
+                if @videoTypes contains " {@extension} " {
+                    @sharedKind = "video"
+                }
+                if @photoTypes contains " {@extension} " {
+                    @sharedKind = "photo"
+                }
+                if @audioTypes contains " {@extension} " {
                     @sharedKind = "audio"
                 }
             }
-            /* No extension: iOS's type. */
             if !@sharedKind {
-                if @isText == false {
-                    if @kind contains "Image" {
-                        @sharedKind = "photo"
-                    }
-                    if @kind contains "Media" || @kind contains "Video" || @kind contains "Movie" {
-                        if !@extension {
-                            @sharedKind = "video"
-                        }
-                    }
+                const nativeVideoKind = matchText('(?i)video|movie|film', "{@kind}")
+                const nativePhotoKind = matchText('(?i)image|photo|foto|afbeelding', "{@kind}")
+                const nativeAudioKind = matchText('(?i)audio|sound|geluid', "{@kind}")
+                if nativeVideoKind {
+                    @sharedKind = "video"
+                }
+                if nativePhotoKind {
+                    @sharedKind = "photo"
+                }
+                if nativeAudioKind {
+                    @sharedKind = "audio"
+                }
+                if !@sharedKind {
+                    @sharedKind = "ask"
                 }
             }
-            /* Still unknown, but something other than text was shared:
-               say what arrived and let the tools be picked. */
-            if !@sharedKind {
-                if @isText == false {
-                    menu "AnyDL could not tell what this is ({@kind} · .{@extension}). Which tools?" {
-                        item "Video tools":
-                            @sharedKind = "video"
-                        item "Photo tools":
-                            @sharedKind = "photo"
-                        item "Audio tools":
-                            @sharedKind = "audio"
-                        item "Main menu":
-                            nothing()
-                    }
-                }
-            }
-            if @sharedKind {
-                @shared = @firstShared
-                @view = "tools"
-            }
+        }
+        if @sharedKind {
+            @shared = @firstShared
+            @link = ""
+            @view = "tools"
         }
     }
 }
@@ -548,7 +542,7 @@ repeat round for 60 {
             @extension = lowercase("{videoExtension}")
             @wrongKind = false
             if @extension {
-                if @videoTypes !contains @extension {
+                if @videoTypes !contains " {@extension} " {
                     @wrongKind = true
                 }
             }
@@ -658,7 +652,7 @@ repeat round for 60 {
             @extension = lowercase("{photoExtension}")
             @wrongKind = false
             if @extension {
-                if @photoTypes !contains @extension {
+                if @photoTypes !contains " {@extension} " {
                     @wrongKind = true
                 }
             }
@@ -793,7 +787,7 @@ repeat round for 60 {
             @extension = lowercase("{audioExtension}")
             @wrongKind = false
             if @extension {
-                if @audioTypes !contains @extension {
+                if @audioTypes !contains " {@extension} " {
                     @wrongKind = true
                 }
             }
