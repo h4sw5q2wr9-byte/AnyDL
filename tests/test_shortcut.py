@@ -147,3 +147,30 @@ def test_old_results_cannot_come_back():
 def test_a_download_never_starts_without_a_link():
     guard = code.index("There is no web link to download")
     assert guard < code.index('aShellRun("cd $SHORTCUTS', code.index('@extra = ""'))
+
+
+def routing():
+    start = code.index("const inputKind = typeOf(ShortcutInput)")
+    return code[start:code.index('@heading = "AnyDL"', start)]
+
+
+def test_the_input_type_is_identified_first():
+    block = routing()
+    assert block.index("typeOf(ShortcutInput)") < block.index("getURLs(")
+
+
+def test_a_file_link_gives_its_extension():
+    pattern = re.search(r"const endingFound = matchText\('([^']+)'", code).group(1)
+    for text, ending in (("file:///private/var/mobile/Media/DCIM/100APPLE/IMG_1234.MOV", ".MOV"),
+                         ("IMG_5678.HEIC", ".HEIC"), ("voice memo.m4a", ".m4a")):
+        assert re.search(pattern, text).group(0) == ending
+    assert not re.search(pattern, "just some text")
+
+
+def test_every_kind_of_input_has_a_screen():
+    block = routing()
+    for kind in ("video", "photo", "audio"):
+        assert '@sharedKind = "%s"' % kind in block
+    assert '@view = "tools"' in block            # files → their tools
+    assert "@link = getFirstItem(found)" in block  # web links → download menu
+    assert "Which tools?" in block                # unknown files → pick tools

@@ -239,29 +239,48 @@ if @update contains "." {
 @videoTypes = "mov mp4 m4v 3gp avi mkv webm hevc"
 @photoTypes = "heic heif jpg jpeg png gif webp tiff tif bmp dng avif"
 @audioTypes = "m4a mp3 wav aac aiff aif caf flac ogg opus"
-/* Only web links count. A video shared from Photos reads as a link too:
-   as its file, file:///…/IMG_1234.MOV, or as its name, IMG_1234.MOV,
-   which looks like a web address because .mov is a web domain. */
+/* What was shared decides the first screen:
+     a video → Video tools, a photo → Photo tools, audio → Audio tools,
+     a web link → the download menu, nothing (or plain text) → the main menu.
+   iOS's own type comes first. A shared file can also arrive as a link to
+   the file (file:///…/IMG_1234.MOV) or as its name, so only http and https
+   links are downloads, and a file's kind comes from its file extension. */
+@kind = ""
+@extension = ""
 if @input !contains "anydl-return" {
-    const found = getURLs("{ShortcutInput}")
-    @link = getFirstItem(found)
-    const webLinkFound = matchText('(?i)^https?://', "{@link}")
-    if !webLinkFound {
-        @link = ""
-    }
-    const fileNameFound = matchText('(?i)^(https?://)?[^/]+\.(mov|mp4|m4v|3gp|avi|mkv|webm|hevc|heic|heif|jpg|jpeg|png|gif|webp|tiff|tif|bmp|dng|avif|m4a|mp3|wav|aac|aiff|aif|caf|flac|ogg|opus|pdf|zip)/?$', "{@link}")
-    if fileNameFound {
-        @link = ""
-    }
-    /* No link: a shared photo, video or audio file opens its tools. The
-       file extension says which; when there is none, Media tools asks. */
-    if !@link {
-        if ShortcutInput {
-            const inputKind = typeOf(ShortcutInput)
-            @kind = "{inputKind}"
-            @firstShared = getFirstItem(ShortcutInput)
-            const sharedExtension = fileDetailOf(@firstShared, "File Extension")
-            @extension = lowercase("{sharedExtension}")
+    if ShortcutInput {
+        const inputKind = typeOf(ShortcutInput)
+        @kind = "{inputKind}"
+        @firstShared = getFirstItem(ShortcutInput)
+        @sharedText = "{@firstShared}"
+
+        /* A web link. */
+        @isText = false
+        if @kind contains "Text" || @kind contains "URL" || @kind contains "web page" {
+            @isText = true
+            const found = getURLs("{ShortcutInput}")
+            @link = getFirstItem(found)
+            const webLinkFound = matchText('(?i)^https?://', "{@link}")
+            if !webLinkFound {
+                @link = ""
+            }
+            const fileNameFound = matchText('(?i)^(https?://)?[^/]+\.(mov|mp4|m4v|3gp|avi|mkv|webm|hevc|heic|heif|jpg|jpeg|png|gif|webp|tiff|tif|bmp|dng|avif|m4a|mp3|wav|aac|aiff|aif|caf|flac|ogg|opus|pdf|zip)/?$', "{@link}")
+            if fileNameFound {
+                @link = ""
+            }
+        }
+
+        /* A file: video, photo or audio, from its file extension, read
+           from the file or from the end of its name or file link. */
+        if !@link {
+            const detailExtension = fileDetailOf(@firstShared, "File Extension")
+            @extension = lowercase("{detailExtension}")
+            if !@extension {
+                const endingFound = matchText('(?i)\.[a-z0-9]{2,5}$', "{@sharedText}")
+                const ending = getFirstItem(endingFound)
+                const endingText = replaceText(".", "", "{ending}")
+                @extension = lowercase("{endingText}")
+            }
             if @extension {
                 if @videoTypes contains @extension {
                     @sharedKind = "video"
@@ -273,12 +292,32 @@ if @input !contains "anydl-return" {
                     @sharedKind = "audio"
                 }
             }
+            /* No extension: iOS's type. */
             if !@sharedKind {
-                if @kind contains "Image" || @kind contains "Media" || @kind contains "Photo" || @kind contains "File" || @kind contains "PDF" {
-                    if @extension {
-                        alert("AnyDL can download links and edit videos, photos and audio. This is a .{@extension} file ({@kind}), which it cannot open.", "AnyDL")
-                    } else {
-                        @sharedKind = "ask"
+                if @isText == false {
+                    if @kind contains "Image" {
+                        @sharedKind = "photo"
+                    }
+                    if @kind contains "Media" || @kind contains "Video" || @kind contains "Movie" {
+                        if !@extension {
+                            @sharedKind = "video"
+                        }
+                    }
+                }
+            }
+            /* Still unknown, but something other than text was shared:
+               say what arrived and let the tools be picked. */
+            if !@sharedKind {
+                if @isText == false {
+                    menu "AnyDL could not tell what this is ({@kind} · .{@extension}). Which tools?" {
+                        item "Video tools":
+                            @sharedKind = "video"
+                        item "Photo tools":
+                            @sharedKind = "photo"
+                        item "Audio tools":
+                            @sharedKind = "audio"
+                        item "Main menu":
+                            nothing()
                     }
                 }
             }

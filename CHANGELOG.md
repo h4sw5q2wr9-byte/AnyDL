@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.5
+
+**Fixed**
+
+- Sharing a video or photo from Photos now opens its tools. What was shared
+  is identified first: a video opens Video tools, a photo Photo tools,
+  audio Audio tools, a web link the download menu, and nothing (or text
+  without a link) the main menu. A file that iOS passes on as a link to
+  the file (file:///…/IMG_1234.MOV) is recognised by its file extension.
+- When AnyDL cannot tell what was shared, it says what it received and asks
+  which tools to use, instead of showing the main menu.
+
 ## 3.4
 
 **Fixed**
