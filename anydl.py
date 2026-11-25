@@ -56,7 +56,7 @@ import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
 
-VERSION = "3.5"
+VERSION = "3.0"
 
 BASE = os.environ.get("ANYDL_DIR") or os.environ.get("SHORTCUTS") or os.getcwd()
 TMP = os.path.join(BASE, "anydl_tmp")
@@ -2008,13 +2008,7 @@ def main():
             sys.exit(0)
         else:
             if not args:
-                # Nothing to download (a shared file, or text without a link):
-                # the shortcut says so, then opens its menu.
-                write_status("No web link was found. Share a link from Safari, YouTube, "
-                             "TikTok or X, or use Media tools for videos and photos.")
-                say("No web link found. Opening the AnyDL menu…")
-                back_to_shortcuts()
-                sys.exit(0)
+                finish(error="No link was given.")
             JOB.update(url=args[0], mode=mode)
             check_for_update(options)
             weekly_update()

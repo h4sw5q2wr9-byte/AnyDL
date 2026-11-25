@@ -426,8 +426,7 @@ def test_gallery_from_a_page(anydl, site, monkeypatch):
 
 def test_failures_have_plain_messages(anydl, site):
     assert run_job(anydl, "video", site + "/missing.mp4").startswith("The link leads nowhere")
-    assert run_job(anydl, "video", "IMG_1234.MOV").startswith("No web link was found")
-    assert anydl.commands[-1].startswith("open shortcuts://")
+    assert run_job(anydl, "video", "not a link") == "No link was given."
     assert run_job(anydl, "file", site + "/empty.html") == "No files found at that link."
     assert anydl.commands[-1].startswith("open shortcuts://")
 

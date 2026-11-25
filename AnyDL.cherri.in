@@ -71,11 +71,6 @@ action 'encodemedia' encodeVideoHEVC4K(variable video: 'WFMedia') {
 if @input contains "anydl-return" {
     const statusFile = aShellGet("anydl_status.txt", true, true)
     @status = "{statusFile}"
-    /* A result is shown once: mark it as seen so an old one can never come
-       back as a surprise message later. */
-    const seenStatusText = "DONE"
-    const seenStatusFile = setName(seenStatusText, "anydl_status.txt", true)
-    aShellPut(seenStatusFile, true)
     if @status == "PICK" {
         /* Several items on the page: pick here, then run the downloader again. */
         const choicesFile = aShellGet("anydl_choices.txt", true, true)
@@ -137,23 +132,18 @@ if @input contains "anydl-return" {
         const clearedFile = aShellGet("anydl_message.txt", true, true)
         alert("{clearedFile}", "Clear downloads")
     } else {
-        if @status == "OK" {
-            /* Several files: preview them here, where you can swipe through them. */
-            const listFile = aShellGet("anydl_files.txt", true, true)
-            const names = splitText("{listFile}", "\n")
-            const downloads = for fileName in names {
-                aShellGet("{@fileName}", true, true)
-            }
-            quicklook(downloads)
+        if @status != "OK" {
+            alert("{@status}", "AnyDL")
             stop()
         }
-        /* An error: say what went wrong, then the menu, so AnyDL stays
-           usable. Results already shown (DONE) and empty ones are skipped. */
-        if @status != "DONE" {
-            if @status {
-                alert("{@status}", "AnyDL")
-            }
+        /* Several files: preview them here, where you can swipe through them. */
+        const listFile = aShellGet("anydl_files.txt", true, true)
+        const names = splitText("{listFile}", "\n")
+        const downloads = for fileName in names {
+            aShellGet("{@fileName}", true, true)
         }
+        quicklook(downloads)
+        stop()
     }
 }
 
@@ -232,99 +222,21 @@ if @update contains "." {
 /* ------------------------------------------------ What was shared. */
 /* A link (shared, or on the clipboard) opens the download menu. A photo,
    video or audio file shared to AnyDL opens the matching media tools. */
+const found = getURLs("{ShortcutInput}")
+@link = getFirstItem(found)
 @shared
 @sharedKind = ""
 @view = "home"
-@link = ""
 @videoTypes = "mov mp4 m4v 3gp avi mkv webm hevc"
 @photoTypes = "heic heif jpg jpeg png gif webp tiff tif bmp dng avif"
 @audioTypes = "m4a mp3 wav aac aiff aif caf flac ogg opus"
-/* What was shared decides the first screen:
-     a video → Video tools, a photo → Photo tools, audio → Audio tools,
-     a web link → the download menu, nothing (or plain text) → the main menu.
-   iOS's own type comes first. A shared file can also arrive as a link to
-   the file (file:///…/IMG_1234.MOV) or as its name, so only http and https
-   links are downloads, and a file's kind comes from its file extension. */
-@kind = ""
-@extension = ""
-if @input !contains "anydl-return" {
-    if ShortcutInput {
+if !@link {
+    if @input !contains "anydl-return" {
         const inputKind = typeOf(ShortcutInput)
         @kind = "{inputKind}"
-        @firstShared = getFirstItem(ShortcutInput)
-        @sharedText = "{@firstShared}"
-
-        /* A web link. */
-        @isText = false
-        if @kind contains "Text" || @kind contains "URL" || @kind contains "web page" {
-            @isText = true
-            const found = getURLs("{ShortcutInput}")
-            @link = getFirstItem(found)
-            const webLinkFound = matchText('(?i)^https?://', "{@link}")
-            if !webLinkFound {
-                @link = ""
-            }
-            const fileNameFound = matchText('(?i)^(https?://)?[^/]+\.(mov|mp4|m4v|3gp|avi|mkv|webm|hevc|heic|heif|jpg|jpeg|png|gif|webp|tiff|tif|bmp|dng|avif|m4a|mp3|wav|aac|aiff|aif|caf|flac|ogg|opus|pdf|zip)/?$', "{@link}")
-            if fileNameFound {
-                @link = ""
-            }
-        }
-
-        /* A file: video, photo or audio, from its file extension, read
-           from the file or from the end of its name or file link. */
-        if !@link {
-            const detailExtension = fileDetailOf(@firstShared, "File Extension")
-            @extension = lowercase("{detailExtension}")
-            if !@extension {
-                const endingFound = matchText('(?i)\.[a-z0-9]{2,5}$', "{@sharedText}")
-                const ending = getFirstItem(endingFound)
-                const endingText = replaceText(".", "", "{ending}")
-                @extension = lowercase("{endingText}")
-            }
-            if @extension {
-                if @videoTypes contains @extension {
-                    @sharedKind = "video"
-                }
-                if @photoTypes contains @extension {
-                    @sharedKind = "photo"
-                }
-                if @audioTypes contains @extension {
-                    @sharedKind = "audio"
-                }
-            }
-            /* No extension: iOS's type. */
-            if !@sharedKind {
-                if @isText == false {
-                    if @kind contains "Image" {
-                        @sharedKind = "photo"
-                    }
-                    if @kind contains "Media" || @kind contains "Video" || @kind contains "Movie" {
-                        if !@extension {
-                            @sharedKind = "video"
-                        }
-                    }
-                }
-            }
-            /* Still unknown, but something other than text was shared:
-               say what arrived and let the tools be picked. */
-            if !@sharedKind {
-                if @isText == false {
-                    menu "AnyDL could not tell what this is ({@kind} · .{@extension}). Which tools?" {
-                        item "Video tools":
-                            @sharedKind = "video"
-                        item "Photo tools":
-                            @sharedKind = "photo"
-                        item "Audio tools":
-                            @sharedKind = "audio"
-                        item "Main menu":
-                            nothing()
-                    }
-                }
-            }
-            if @sharedKind {
-                @shared = @firstShared
-                @view = "tools"
-            }
+        if @kind contains "Image" || @kind contains "Media" || @kind contains "File" {
+            @shared = ShortcutInput
+            @view = "tools"
         }
     }
 }
@@ -383,17 +295,9 @@ repeat round for 60 {
             @view = "more"
         }
         if @menuPick == "Download a link" {
-            const pasted = prompt("Paste the link to download", "URL")
-            const pastedLinks = getURLs("{pasted}")
-            @link = getFirstItem(pastedLinks)
-            const pastedWebLink = matchText('(?i)^https?://', "{@link}")
-            if pastedWebLink {
-                const pastedSite = getURLDetail("{@link}", "Host")
-                @heading = "Download from {pastedSite}"
-            } else {
-                @link = ""
-                alert("That is not a web link. Copy the link from the app's Share › Copy link, then try again.", "Download a link")
-            }
+            @link = prompt("Paste the link to download", "URL")
+            const pastedSite = getURLDetail("{@link}", "Host")
+            @heading = "Download from {pastedSite}"
         }
         if @menuPick == "Media tools" {
             @view = "tools"
@@ -430,13 +334,6 @@ repeat round for 60 {
     }
 
     /* -------------------------------------------- Download. */
-    /* A download needs a web link; never start a-Shell without one. */
-    if @mode {
-        if !@link {
-            alert("There is no web link to download. Copy a link and run AnyDL again, or use Media tools for videos and photos.", "AnyDL")
-            @mode = ""
-        }
-    }
     if @mode {
         /* Video quality for this download, when the setting says to ask. */
         @extra = ""
@@ -463,6 +360,23 @@ repeat round for 60 {
        file extension, so each tool only ever gets the kind it can handle. */
     if @view == "tools" {
         if @shared {
+            if !@sharedKind {
+                const sharedExtension = fileDetailOf(@shared, "File Extension")
+                @extension = lowercase("{sharedExtension}")
+                @sharedKind = "other"
+                if @videoTypes contains @extension {
+                    @sharedKind = "video"
+                }
+                if @photoTypes contains @extension {
+                    @sharedKind = "photo"
+                }
+                if @audioTypes contains @extension {
+                    @sharedKind = "audio"
+                }
+                if !@extension {
+                    @sharedKind = "other"
+                }
+            }
             if @sharedKind == "video" {
                 @view = "tools-video"
             }
@@ -486,26 +400,17 @@ repeat round for 60 {
         const toolsChoice = chooseFromList(@toolCards, "Media tools")
         @menuPick = "{toolsChoice}"
         @view = "home"
-        @pickedKind = ""
         if @menuPick == "Video tools" {
             @view = "tools-video"
-            @pickedKind = "video"
         }
         if @menuPick == "Photo tools" {
             @view = "tools-photo"
-            @pickedKind = "photo"
         }
         if @menuPick == "Audio tools" {
             @view = "tools-audio"
-            @pickedKind = "audio"
         }
-        /* A shared file of unknown kind goes to the tools picked here. */
-        if @sharedKind == "ask" {
-            @sharedKind = @pickedKind
-        } else {
-            @shared = nil
-            @sharedKind = ""
-        }
+        @shared = nil
+        @sharedKind = ""
     }
 
     @result = nil
@@ -546,13 +451,7 @@ repeat round for 60 {
             }
             const videoExtension = fileDetailOf(@media, "File Extension")
             @extension = lowercase("{videoExtension}")
-            @wrongKind = false
-            if @extension {
-                if @videoTypes !contains @extension {
-                    @wrongKind = true
-                }
-            }
-            if @wrongKind == true {
+            if @videoTypes !contains @extension || !@extension {
                 alert("That file is not a video (.{@extension}). Choose a video, or use Photo tools or Audio tools.", "Video tools")
             } else {
                 const videoSizeBefore = fileDetailOf(@media, "File Size")
@@ -656,13 +555,7 @@ repeat round for 60 {
             }
             const photoExtension = fileDetailOf(@media, "File Extension")
             @extension = lowercase("{photoExtension}")
-            @wrongKind = false
-            if @extension {
-                if @photoTypes !contains @extension {
-                    @wrongKind = true
-                }
-            }
-            if @wrongKind == true {
+            if @photoTypes !contains @extension || !@extension {
                 alert("That file is not a photo (.{@extension}). Choose a photo, or use Video tools or Audio tools.", "Photo tools")
             } else {
                 const photoSizeBefore = fileDetailOf(@media, "File Size")
@@ -791,13 +684,7 @@ repeat round for 60 {
             }
             const audioExtension = fileDetailOf(@media, "File Extension")
             @extension = lowercase("{audioExtension}")
-            @wrongKind = false
-            if @extension {
-                if @audioTypes !contains @extension {
-                    @wrongKind = true
-                }
-            }
-            if @wrongKind == true {
+            if @audioTypes !contains @extension || !@extension {
                 alert("That file is not audio (.{@extension}). Choose an audio file, or use Video tools or Photo tools.", "Audio tools")
             } else {
                 const audioSizeBefore = fileDetailOf(@media, "File Size")
