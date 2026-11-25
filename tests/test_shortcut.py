@@ -108,6 +108,18 @@ def test_video_sizes_use_the_multiplication_sign():
     assert sizes and all("x" not in size for size in sizes), sizes
 
 
-def test_shared_files_are_recognised_before_links():
+def test_a_file_name_is_not_taken_for_a_link():
     # A shared video's name (IMG_1234.MOV) reads as a link: .mov is a web domain.
-    assert code.index("typeOf(ShortcutInput)") < code.index('getURLs("{ShortcutInput}")')
+    pattern = re.search(r"const fileNameFound = matchText\('([^']+)'", code).group(1)
+    for name in ("http://IMG_1234.MOV", "IMG_5678.HEIC", "http://clip.mp4/"):
+        assert re.search(pattern, name, re.I), name
+    for link in ("https://youtu.be/abc", "https://example.com/video.mp4", "https://www.tiktok.com/@a/video/1",
+                 "https://x.com/a/status/1"):
+        assert not re.search(pattern, link, re.I), link
+    assert code.index("fileNameFound") < code.index('fileDetailOf(@firstShared, "File Extension")')
+
+
+def test_errors_return_to_the_menu():
+    second_half = code[code.index('if @input contains "anydl-return"'):code.index("const welcomeText")]
+    assert 'if @status != "NOLINK"' in second_half
+    assert 'alert("{@status}", "AnyDL")\n            stop()' not in second_half

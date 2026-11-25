@@ -132,18 +132,21 @@ if @input contains "anydl-return" {
         const clearedFile = aShellGet("anydl_message.txt", true, true)
         alert("{clearedFile}", "Clear downloads")
     } else {
-        if @status != "OK" {
-            alert("{@status}", "AnyDL")
+        if @status == "OK" {
+            /* Several files: preview them here, where you can swipe through them. */
+            const listFile = aShellGet("anydl_files.txt", true, true)
+            const names = splitText("{listFile}", "\n")
+            const downloads = for fileName in names {
+                aShellGet("{@fileName}", true, true)
+            }
+            quicklook(downloads)
             stop()
         }
-        /* Several files: preview them here, where you can swipe through them. */
-        const listFile = aShellGet("anydl_files.txt", true, true)
-        const names = splitText("{listFile}", "\n")
-        const downloads = for fileName in names {
-            aShellGet("{@fileName}", true, true)
+        /* An error: say what went wrong, then the menu, so AnyDL stays
+           usable. No link: straight to the menu. */
+        if @status != "NOLINK" {
+            alert("{@status}", "AnyDL")
         }
-        quicklook(downloads)
-        stop()
     }
 }
 
@@ -229,17 +232,39 @@ if @update contains "." {
 @videoTypes = "mov mp4 m4v 3gp avi mkv webm hevc"
 @photoTypes = "heic heif jpg jpeg png gif webp tiff tif bmp dng avif"
 @audioTypes = "m4a mp3 wav aac aiff aif caf flac ogg opus"
-/* The type comes first: a shared video's name, such as IMG_1234.MOV,
-   reads as a link (.mov is a web domain), so looking for links first
-   would offer to download it. */
-const inputKind = typeOf(ShortcutInput)
-@kind = "{inputKind}"
-if @kind contains "Image" || @kind contains "Media" || @kind contains "File" || @kind contains "PDF" {
-    @shared = getFirstItem(ShortcutInput)
-    @view = "tools"
-} else {
+/* A link, unless it is only a file name: a shared video's name, such as
+   IMG_1234.MOV, reads as a link because .mov is a web domain. */
+if @input !contains "anydl-return" {
     const found = getURLs("{ShortcutInput}")
     @link = getFirstItem(found)
+    const fileNameFound = matchText('^(https?://)?[^/]+\.(mov|mp4|m4v|3gp|avi|mkv|webm|hevc|heic|heif|jpg|jpeg|png|gif|webp|tiff|tif|bmp|dng|avif|m4a|mp3|wav|aac|aiff|aif|caf|flac|ogg|opus|pdf|zip)/?$', "{@link}", false)
+    if fileNameFound {
+        @link = ""
+    }
+    /* No link: a shared photo, video or audio file opens its tools,
+       recognised by its file extension. Anything else opens the menu. */
+    if !@link {
+        if ShortcutInput {
+            @firstShared = getFirstItem(ShortcutInput)
+            const sharedExtension = fileDetailOf(@firstShared, "File Extension")
+            @extension = lowercase("{sharedExtension}")
+            if @extension {
+                if @videoTypes contains @extension {
+                    @sharedKind = "video"
+                }
+                if @photoTypes contains @extension {
+                    @sharedKind = "photo"
+                }
+                if @audioTypes contains @extension {
+                    @sharedKind = "audio"
+                }
+            }
+            if @sharedKind {
+                @shared = @firstShared
+                @view = "tools"
+            }
+        }
+    }
 }
 @heading = "AnyDL"
 if @link {
@@ -361,23 +386,6 @@ repeat round for 60 {
        file extension, so each tool only ever gets the kind it can handle. */
     if @view == "tools" {
         if @shared {
-            if !@sharedKind {
-                const sharedExtension = fileDetailOf(@shared, "File Extension")
-                @extension = lowercase("{sharedExtension}")
-                @sharedKind = "other"
-                if @videoTypes contains @extension {
-                    @sharedKind = "video"
-                }
-                if @photoTypes contains @extension {
-                    @sharedKind = "photo"
-                }
-                if @audioTypes contains @extension {
-                    @sharedKind = "audio"
-                }
-                if !@extension {
-                    @sharedKind = "other"
-                }
-            }
             if @sharedKind == "video" {
                 @view = "tools-video"
             }
@@ -386,11 +394,6 @@ repeat round for 60 {
             }
             if @sharedKind == "audio" {
                 @view = "tools-audio"
-            }
-            if @sharedKind == "other" {
-                alert("AnyDL's tools work on videos, photos and audio. To download something, share its link instead.", "AnyDL")
-                @shared = nil
-                @sharedKind = ""
             }
         }
     }

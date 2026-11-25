@@ -56,7 +56,7 @@ import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
 
-VERSION = "3.1"
+VERSION = "3.2"
 
 BASE = os.environ.get("ANYDL_DIR") or os.environ.get("SHORTCUTS") or os.getcwd()
 TMP = os.path.join(BASE, "anydl_tmp")
@@ -2008,7 +2008,12 @@ def main():
             sys.exit(0)
         else:
             if not args:
-                finish(error="No link was given.")
+                # Nothing to download (a shared file, or text without a link):
+                # the shortcut opens its menu instead of showing an error.
+                write_status("NOLINK")
+                say("No link found. Opening the AnyDL menu…")
+                back_to_shortcuts()
+                sys.exit(0)
             JOB.update(url=args[0], mode=mode)
             check_for_update(options)
             weekly_update()

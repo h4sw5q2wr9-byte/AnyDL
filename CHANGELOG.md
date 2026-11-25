@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.2
+
+**Fixed**
+
+- Sharing a video from Photos still started a download that ended with
+  "No link was given". A link that is only a file name, such as
+  IMG_1234.MOV, is no longer taken for a link, and shared files are
+  recognised by their file extension: a video opens Video tools (Compress
+  video at the top), a photo Photo tools, audio Audio tools.
+- Anything else without a link opens the AnyDL menu instead of an error.
+- When a download fails, AnyDL says why and then opens its menu, instead of
+  ending, so you can try something else right away.
+
 ## 3.1
 
 **Fixed**
