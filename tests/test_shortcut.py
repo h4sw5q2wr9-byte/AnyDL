@@ -119,7 +119,20 @@ def test_a_file_name_is_not_taken_for_a_link():
     assert code.index("fileNameFound") < code.index('fileDetailOf(@firstShared, "File Extension")')
 
 
+def test_only_web_links_are_downloaded():
+    # A video shared from Photos reads as file:///…/IMG_1234.MOV.
+    pattern = re.search(r"const webLinkFound = matchText\('([^']+)'", code).group(1)
+    assert not re.search(pattern, "file:///private/var/mobile/Media/DCIM/100APPLE/IMG_1234.MOV", re.I)
+    assert re.search(pattern, "https://youtu.be/abc", re.I)
+    assert re.search(pattern, "HTTP://example.com", re.I)
+
+
+def test_media_tools_accept_a_shared_file_without_an_extension():
+    assert "|| !@extension {" not in code
+    assert code.count("if @wrongKind == true {") == 3
+
+
 def test_errors_return_to_the_menu():
     second_half = code[code.index('if @input contains "anydl-return"'):code.index("const welcomeText")]
-    assert 'if @status != "NOLINK"' in second_half
+    assert 'alert("{@status}", "AnyDL")' in second_half
     assert 'alert("{@status}", "AnyDL")\n            stop()' not in second_half

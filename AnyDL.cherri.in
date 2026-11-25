@@ -143,10 +143,8 @@ if @input contains "anydl-return" {
             stop()
         }
         /* An error: say what went wrong, then the menu, so AnyDL stays
-           usable. No link: straight to the menu. */
-        if @status != "NOLINK" {
-            alert("{@status}", "AnyDL")
-        }
+           usable. */
+        alert("{@status}", "AnyDL")
     }
 }
 
@@ -232,19 +230,26 @@ if @update contains "." {
 @videoTypes = "mov mp4 m4v 3gp avi mkv webm hevc"
 @photoTypes = "heic heif jpg jpeg png gif webp tiff tif bmp dng avif"
 @audioTypes = "m4a mp3 wav aac aiff aif caf flac ogg opus"
-/* A link, unless it is only a file name: a shared video's name, such as
-   IMG_1234.MOV, reads as a link because .mov is a web domain. */
+/* Only web links count. A video shared from Photos reads as a link too:
+   as its file, file:///…/IMG_1234.MOV, or as its name, IMG_1234.MOV,
+   which looks like a web address because .mov is a web domain. */
 if @input !contains "anydl-return" {
     const found = getURLs("{ShortcutInput}")
     @link = getFirstItem(found)
-    const fileNameFound = matchText('^(https?://)?[^/]+\.(mov|mp4|m4v|3gp|avi|mkv|webm|hevc|heic|heif|jpg|jpeg|png|gif|webp|tiff|tif|bmp|dng|avif|m4a|mp3|wav|aac|aiff|aif|caf|flac|ogg|opus|pdf|zip)/?$', "{@link}", false)
+    const webLinkFound = matchText('(?i)^https?://', "{@link}")
+    if !webLinkFound {
+        @link = ""
+    }
+    const fileNameFound = matchText('(?i)^(https?://)?[^/]+\.(mov|mp4|m4v|3gp|avi|mkv|webm|hevc|heic|heif|jpg|jpeg|png|gif|webp|tiff|tif|bmp|dng|avif|m4a|mp3|wav|aac|aiff|aif|caf|flac|ogg|opus|pdf|zip)/?$', "{@link}")
     if fileNameFound {
         @link = ""
     }
-    /* No link: a shared photo, video or audio file opens its tools,
-       recognised by its file extension. Anything else opens the menu. */
+    /* No link: a shared photo, video or audio file opens its tools. The
+       file extension says which; when there is none, Media tools asks. */
     if !@link {
         if ShortcutInput {
+            const inputKind = typeOf(ShortcutInput)
+            @kind = "{inputKind}"
             @firstShared = getFirstItem(ShortcutInput)
             const sharedExtension = fileDetailOf(@firstShared, "File Extension")
             @extension = lowercase("{sharedExtension}")
@@ -257,6 +262,15 @@ if @input !contains "anydl-return" {
                 }
                 if @audioTypes contains @extension {
                     @sharedKind = "audio"
+                }
+            }
+            if !@sharedKind {
+                if @kind contains "Image" || @kind contains "Media" || @kind contains "Photo" || @kind contains "File" || @kind contains "PDF" {
+                    if @extension {
+                        alert("AnyDL can download links and edit videos, photos and audio. This is a .{@extension} file ({@kind}), which it cannot open.", "AnyDL")
+                    } else {
+                        @sharedKind = "ask"
+                    }
                 }
             }
             if @sharedKind {
@@ -321,9 +335,17 @@ repeat round for 60 {
             @view = "more"
         }
         if @menuPick == "Download a link" {
-            @link = prompt("Paste the link to download", "URL")
-            const pastedSite = getURLDetail("{@link}", "Host")
-            @heading = "Download from {pastedSite}"
+            const pasted = prompt("Paste the link to download", "URL")
+            const pastedLinks = getURLs("{pasted}")
+            @link = getFirstItem(pastedLinks)
+            const pastedWebLink = matchText('(?i)^https?://', "{@link}")
+            if pastedWebLink {
+                const pastedSite = getURLDetail("{@link}", "Host")
+                @heading = "Download from {pastedSite}"
+            } else {
+                @link = ""
+                alert("That is not a web link. Copy the link from the app's Share › Copy link, then try again.", "Download a link")
+            }
         }
         if @menuPick == "Media tools" {
             @view = "tools"
@@ -409,17 +431,26 @@ repeat round for 60 {
         const toolsChoice = chooseFromList(@toolCards, "Media tools")
         @menuPick = "{toolsChoice}"
         @view = "home"
+        @pickedKind = ""
         if @menuPick == "Video tools" {
             @view = "tools-video"
+            @pickedKind = "video"
         }
         if @menuPick == "Photo tools" {
             @view = "tools-photo"
+            @pickedKind = "photo"
         }
         if @menuPick == "Audio tools" {
             @view = "tools-audio"
+            @pickedKind = "audio"
         }
-        @shared = nil
-        @sharedKind = ""
+        /* A shared file of unknown kind goes to the tools picked here. */
+        if @sharedKind == "ask" {
+            @sharedKind = @pickedKind
+        } else {
+            @shared = nil
+            @sharedKind = ""
+        }
     }
 
     @result = nil
@@ -460,7 +491,13 @@ repeat round for 60 {
             }
             const videoExtension = fileDetailOf(@media, "File Extension")
             @extension = lowercase("{videoExtension}")
-            if @videoTypes !contains @extension || !@extension {
+            @wrongKind = false
+            if @extension {
+                if @videoTypes !contains @extension {
+                    @wrongKind = true
+                }
+            }
+            if @wrongKind == true {
                 alert("That file is not a video (.{@extension}). Choose a video, or use Photo tools or Audio tools.", "Video tools")
             } else {
                 const videoSizeBefore = fileDetailOf(@media, "File Size")
@@ -564,7 +601,13 @@ repeat round for 60 {
             }
             const photoExtension = fileDetailOf(@media, "File Extension")
             @extension = lowercase("{photoExtension}")
-            if @photoTypes !contains @extension || !@extension {
+            @wrongKind = false
+            if @extension {
+                if @photoTypes !contains @extension {
+                    @wrongKind = true
+                }
+            }
+            if @wrongKind == true {
                 alert("That file is not a photo (.{@extension}). Choose a photo, or use Video tools or Audio tools.", "Photo tools")
             } else {
                 const photoSizeBefore = fileDetailOf(@media, "File Size")
@@ -693,7 +736,13 @@ repeat round for 60 {
             }
             const audioExtension = fileDetailOf(@media, "File Extension")
             @extension = lowercase("{audioExtension}")
-            if @audioTypes !contains @extension || !@extension {
+            @wrongKind = false
+            if @extension {
+                if @audioTypes !contains @extension {
+                    @wrongKind = true
+                }
+            }
+            if @wrongKind == true {
                 alert("That file is not audio (.{@extension}). Choose an audio file, or use Video tools or Photo tools.", "Audio tools")
             } else {
                 const audioSizeBefore = fileDetailOf(@media, "File Size")

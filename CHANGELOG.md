@@ -1,5 +1,20 @@
 # Changelog
 
+## 3.3
+
+**Fixed**
+
+- Sharing a video from Photos still did not open the video tools: iOS hands
+  it over as a link to the file on the phone (file:///…/IMG_1234.MOV),
+  which AnyDL took for a download link. Only web links (http and https)
+  are downloaded now, so a shared video opens Video tools, a photo Photo
+  tools and audio Audio tools.
+- When iOS does not say what kind of file was shared, Media tools opens
+  and the tool you pick uses the shared file.
+- A shared file the tools cannot edit gets a message saying so.
+- Download a link checks that what you pasted is a web link.
+- "No web link was found" is shown as a message again, then the menu.
+
 ## 3.2
 
 **Fixed**
