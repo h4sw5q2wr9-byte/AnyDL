@@ -1,0 +1,30 @@
+name: Media routing test build
+on:
+  push:
+    branches: ["fix/media-share-routing"]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: pip install pytest yt-dlp pyflakes
+      - run: python -m pytest tests -q
+      - run: python build.py
+      - run: npm install --no-save playwright
+      - run: npx playwright install --with-deps chromium
+      - run: node tools/compile.js AnyDL.cherri AnyDL-unsigned.shortcut
+      - run: node tools/sign.js AnyDL-unsigned.shortcut AnyDL AnyDL-media-fix.shortcut
+      - run: test "$(head -c 4 AnyDL-media-fix.shortcut)" = "AEA1"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AnyDL-media-fix
+          path: AnyDL-media-fix.shortcut
